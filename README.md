@@ -1,4 +1,40 @@
-# HotkeyExplain — Local LLM Server
+# macsist — HotkeyExplain
+
+Native macOS **menu-bar app**: press a global hotkey to get a **concise Korean
+explanation** of whatever you have **selected** (any app) or of a **screen
+region** you drag-select — streamed token-by-token into a small floating panel
+near the cursor, from a **local** LLM (MLX). No cloud, no Electron.
+
+- **Text explain** (default `⌘⇧E`): reads the selection via Accessibility,
+  falling back to a clipboard-safe synthetic ⌘C (clipboard is always restored).
+- **Region explain** (default `⌘⇧R`): ⌘⇧4-style crosshair → the image goes to a
+  local vision model.
+- Settings (menu-bar icon): server URL, explain/vision models (picker from the
+  server's loaded models), hotkey recorder, detail level (간단/보통/자세히).
+- Stack: Python 3.13 + PyObjC (AppKit), `pynput`, `httpx` SSE; server is
+  MLX-backed (`mlx-lm` / `mlx-vlm`) behind a FastAPI proxy. Apple Silicon,
+  macOS 26.2+.
+
+## Install (two parts)
+
+```bash
+# 1. LLM server — one-time model download, then always-on via launchd
+server/download_models.sh
+server/deploy.sh
+
+# 2. Menu-bar app — always-on via launchd
+app/deploy.sh
+```
+
+On first launch grant **Accessibility** (prompted) and, on first region
+capture, **Screen Recording**, then restart:
+`launchctl kickstart -k "gui/$(id -u)/com.hotkeyexplain.app"`.
+For development, run the app in the foreground instead with `app/run.sh`.
+Full spec and architecture: [docs/SPEC.md](docs/SPEC.md).
+
+---
+
+# Local LLM Server
 
 The macOS app is a thin HTTP client. It assumes an OpenAI-compatible LLM server
 is already running at `http://127.0.0.1:8000`. This document covers that server.
