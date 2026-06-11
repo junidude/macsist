@@ -1,0 +1,15 @@
+# Secrets — never commit
+tokens_and_keys/
+*.key
+
+# Python / conda
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+*.log
+
+# macOS / local tooling
+.DS_Store
+.claude/
