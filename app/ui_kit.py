@@ -13,6 +13,7 @@ from AppKit import (
     NSColor,
     NSFocusRingTypeNone,
     NSFont,
+    NSSecureTextField,
     NSTextField,
     NSTrackingActiveAlways,
     NSTrackingArea,
@@ -75,10 +76,11 @@ class PillButton(NSButton):
         self.effectiveAppearance().performAsCurrentDrawingAppearance_(_apply)
 
 
-def make_round_field(frame, font_size=14.0):
+def make_round_field(frame, font_size=14.0, secure=False):
     """ChatGPT-style input: borderless text field on a rounded gray box.
     Returns (box, field) — add the box to the view tree, talk to the field.
-    NSBox re-resolves its semantic fill on appearance changes."""
+    NSBox re-resolves its semantic fill on appearance changes.
+    secure=True swaps in NSSecureTextField (M9 API-key entry)."""
     box = NSBox.alloc().initWithFrame_(frame)
     box.setBoxType_(NSBoxCustom)
     box.setTitlePosition_(0)
@@ -87,7 +89,8 @@ def make_round_field(frame, font_size=14.0):
     box.setContentViewMargins_(NSMakeSize(0, 0))
     box.setFillColor_(NSColor.labelColor().colorWithAlphaComponent_(0.06))
     field_h = font_size + 6.0
-    field = NSTextField.alloc().initWithFrame_(
+    field_class = NSSecureTextField if secure else NSTextField
+    field = field_class.alloc().initWithFrame_(
         NSMakeRect(10, (frame.size.height - field_h) / 2.0,
                    frame.size.width - 20, field_h)
     )

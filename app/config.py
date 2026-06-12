@@ -26,11 +26,22 @@ def _migrate_legacy_data():
             print(f"migrated {name}: HotkeyExplain/ -> Macsist/", flush=True)
 
 DEFAULTS = {
-    "server_base_url": "http://127.0.0.1:8000",
-    "explain_model": "mlx-community/Qwen3.6-35B-A3B-4bit",
-    # region-capture requests always use this model: the explain model may be
-    # a text-only pick (e.g. Qwen3.6-27B) while vision needs a multimodal one
-    "vision_model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+    # M9: ordered provider list — any OpenAI-compatible endpoint. api_key_env_or_value
+    # is "" (no auth) | "env:VAR" | a Keychain account name (see keychain.py);
+    # actual keys NEVER live in this file. vision_model is separate because the
+    # explain model may be a text-only pick while region capture needs multimodal.
+    # chat_template_kwargs (below) is only ever sent to is_local providers.
+    "providers": [
+        {
+            "name": "로컬 서버",
+            "base_url": "http://127.0.0.1:8000",
+            "api_key_env_or_value": "",
+            "explain_model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+            "vision_model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+            "is_local": True,
+        },
+    ],
+    "active_provider": "로컬 서버",
     "alt_model": "mlx-community/Gemma-4-12B-4bit",
     "agent_model": "mlx-community/Qwen3.6-27B-4bit",
     "system_prompt_text": (
@@ -82,6 +93,9 @@ DEFAULTS = {
     "request_read_timeout": 120.0,
     "health_poll_interval": 10.0,
     "health_poll_timeout": 2.0,
+    # external providers are polled via GET /v1/models over the internet —
+    # needs more headroom than the local 2s budget
+    "health_poll_timeout_external": 5.0,
     "region_max_dim": 1600,
     "capture_copy_timeout": 0.6,
     "capture_modifier_release_timeout": 0.3,
@@ -147,6 +161,29 @@ _SUPERSEDED_DEFAULTS = {
 }
 
 
+def _migrate_providers(on_disk):
+    """M9: fold the pre-provider keys (server_base_url / explain_model /
+    vision_model) into providers[0] so an existing setup keeps working.
+    Returns True if the file should be rewritten."""
+    if "providers" in on_disk:
+        # already migrated — just drop stray legacy keys
+        stray = [k for k in ("server_base_url", "explain_model", "vision_model")
+                 if on_disk.pop(k, None) is not None]
+        return bool(stray)
+    legacy_map = {"server_base_url": "base_url", "explain_model": "explain_model",
+                  "vision_model": "vision_model"}
+    if not any(k in on_disk for k in legacy_map):
+        return False  # fresh file without legacy keys: defaults apply
+    seed = dict(DEFAULTS["providers"][0])
+    for old_key, field in legacy_map.items():
+        if old_key in on_disk:
+            seed[field] = on_disk.pop(old_key)
+    on_disk["providers"] = [seed]
+    on_disk["active_provider"] = seed["name"]
+    print("migrated config: server/model keys -> providers[0]", flush=True)
+    return True
+
+
 class ConfigStore:
     def __init__(self):
         _migrate_legacy_data()
@@ -162,7 +199,10 @@ class ConfigStore:
             for key, stale_values in _SUPERSEDED_DEFAULTS.items():
                 if on_disk.get(key) in stale_values:
                     del on_disk[key]
+            migrated = _migrate_providers(on_disk)
             self._data = {**DEFAULTS, **on_disk}
+            if migrated:
+                self.save()
         else:
             self.save()
 
@@ -178,3 +218,19 @@ class ConfigStore:
 
     def set(self, key, value):
         self._data[key] = value
+
+    def active_provider(self):
+        """The provider dict requests should use right now (M9). Resolved by
+        name on every call so a Settings save / debug hook applies to the next
+        request without restart. Returns a merged copy — hand-edited entries
+        with missing fields must not KeyError; an unknown name or an empty
+        list falls back to providers[0] / the shipped default."""
+        fallback = DEFAULTS["providers"][0]
+        providers = [p for p in self._data.get("providers", []) or []
+                     if isinstance(p, dict)]
+        if not providers:
+            return dict(fallback)
+        name = str(self._data.get("active_provider", ""))
+        chosen = next((p for p in providers if p.get("name") == name),
+                      providers[0])
+        return {**fallback, **chosen}

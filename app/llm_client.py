@@ -1,4 +1,10 @@
-"""LLMClient — httpx SSE streaming client for the local OpenAI-compatible server.
+"""LLMClient — httpx SSE streaming client for OpenAI-compatible servers.
+
+M9: each request resolves config.active_provider() at call time — base URL,
+models and the API key reference all come from the provider entry, so a
+provider switch in Settings applies to the very next request. Keys are
+resolved through keychain.resolve_key (Keychain / env), and every error
+message names the provider that failed.
 
 Threading model: the client is synchronous. The caller (M2: a worker thread per
 hotkey press) iterates `stream_chat(...)` and marshals each chunk to the main
@@ -12,6 +18,8 @@ import socket
 import threading
 
 import httpx
+
+import keychain
 
 
 class LLMError(Exception):
@@ -79,17 +87,27 @@ class LLMClient:
         """
         if handle is None:
             handle = StreamHandle()
-        base_url = str(self.config.get("server_base_url")).rstrip("/")
+        provider = self.config.active_provider()
+        pname = str(provider["name"])
+        base_url = str(provider["base_url"]).rstrip("/")
         payload = {
-            "model": model or self.config.get("explain_model"),
+            "model": model or provider["explain_model"],
             "stream": True,
             "max_tokens": max_tokens or self.config.get("max_tokens"),
             "temperature": self.config.get("temperature"),
             "messages": messages,
         }
         template_kwargs = self.config.get("chat_template_kwargs")
-        if template_kwargs:
+        if template_kwargs and provider["is_local"]:
+            # mlx-lm extension — external providers would reject the field
             payload["chat_template_kwargs"] = template_kwargs
+        headers = {}
+        try:
+            api_key = keychain.resolve_key(provider["api_key_env_or_value"])
+        except keychain.KeychainError as err:
+            raise LLMError(f"{pname}: {err}") from None
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         timeout = httpx.Timeout(
             connect=self.config.get("request_connect_timeout"),
             read=self.config.get("request_read_timeout"),
@@ -99,28 +117,30 @@ class LLMClient:
         try:
             with httpx.Client(timeout=timeout) as client:
                 with client.stream(
-                    "POST", f"{base_url}/v1/chat/completions", json=payload
+                    "POST", f"{base_url}/v1/chat/completions", json=payload,
+                    headers=headers,
                 ) as response:
                     handle._attach(response)
                     if response.status_code >= 400:
                         response.read()
-                        raise self._http_error(response)
+                        raise self._http_error(response, pname)
                     yield from self._iter_sse(response, handle, on_reasoning)
         except LLMError:
             raise
         except httpx.ConnectError:
             raise LLMError(
-                f"서버 다운 — LLM 서버에 연결할 수 없습니다 ({base_url}). "
-                "서버 실행 여부를 확인하세요."
+                f"{pname} 연결 실패 ({base_url}) — 서버/네트워크를 확인하세요."
             ) from None
         except httpx.TimeoutException:
             raise LLMError(
-                f"LLM 서버 응답 시간 초과 ({base_url}) — 서버 상태를 확인하세요."
+                f"{pname} 응답 시간 초과 ({base_url}) — 서버 상태를 확인하세요."
             ) from None
         except httpx.HTTPError as exc:
             if handle.cancelled:
                 return
-            raise LLMError(f"LLM 서버 통신 오류: {exc.__class__.__name__}") from None
+            raise LLMError(
+                f"{pname} 통신 오류: {exc.__class__.__name__}"
+            ) from None
         except Exception:
             # response.close() from another thread surfaces as various stream
             # errors mid-iteration; a cancelled request must end silently.
@@ -128,21 +148,31 @@ class LLMClient:
                 return
             raise
 
-    def _http_error(self, response):
-        """Map an HTTP error response to a user-facing LLMError. The proxy
-        answers 503 {"error": {"code": "model_loading"}} while a backend is
-        still loading its model (M5) — that gets its own message so the user
-        knows to just wait instead of debugging."""
+    def _http_error(self, response, pname):
+        """Map an HTTP error response to a user-facing LLMError. The local
+        proxy answers 503 {"error": {"code": "model_loading"}} while a backend
+        is still loading its model (M5) — that gets its own message so the
+        user knows to just wait. External providers (OpenAI/OpenRouter…)
+        return a useful error.message — surface it instead of guessing."""
+        code, detail = None, None
         try:
-            code = response.json().get("error", {}).get("code")
+            error = response.json().get("error", {})
+            if isinstance(error, dict):
+                code = error.get("code")
+                detail = error.get("message")
         except ValueError:
-            code = None
+            pass
         if response.status_code == 503 and code == "model_loading":
-            return LLMError("모델 로딩 중입니다 — 잠시 후 다시 시도하세요.")
-        return LLMError(
-            f"LLM 서버 오류 (HTTP {response.status_code}) — "
-            "모델 id와 서버 로그를 확인하세요."
-        )
+            return LLMError(f"{pname}: 모델 로딩 중입니다 — 잠시 후 다시 시도하세요.")
+        if response.status_code in (401, 403):
+            return LLMError(
+                f"{pname} 인증 실패 (HTTP {response.status_code}) — "
+                "API 키를 확인하세요."
+            )
+        message = f"{pname} 오류 (HTTP {response.status_code})"
+        if detail:
+            message += f": {str(detail)[:120]}"
+        return LLMError(message)
 
     def _iter_sse(self, response, handle, on_reasoning=None):
         for line in response.iter_lines():
@@ -176,6 +206,9 @@ def _main():
     parser = argparse.ArgumentParser(description="M1 console smoke test")
     parser.add_argument("--base-url", help="override server URL (server-down test)")
     parser.add_argument(
+        "--provider", help="use this provider by name (in-memory, not saved)"
+    )
+    parser.add_argument(
         "--prompt",
         default="대한민국의 수도와 그 도시의 특징을 간단히 설명해줘.",
         help="user prompt (default: hardcoded M1 test prompt)",
@@ -187,8 +220,16 @@ def _main():
     args = parser.parse_args()
 
     config = ConfigStore()
+    if args.provider:
+        config.set("active_provider", args.provider)  # in-memory only, not saved
     if args.base_url:
-        config.set("server_base_url", args.base_url)  # in-memory only, not saved
+        # in-memory only: patch the active provider's URL (server-down test)
+        providers = [dict(p) for p in config.get("providers")]
+        active = config.active_provider()["name"]
+        for entry in providers:
+            if entry.get("name") == active:
+                entry["base_url"] = args.base_url
+        config.set("providers", providers)
 
     client = LLMClient(config)
     handle = StreamHandle()

@@ -10,15 +10,17 @@ its hotkey-explain feature (legacy codename — `HE_DEBUG_*` hooks keep the
 initialism; launchd labels/dirs are `com.macsist.*`, `…/Macsist/`). Global hotkey →
 captures **selected text** or a **screen region** → streams a **concise Korean
 explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
-default; external OpenAI-compatible providers planned in M9) into a floating
-panel near the cursor. **M0–M8 are shipped and running** (M7: JSONL history +
+default, or any external OpenAI-compatible provider — M9) into a floating
+panel near the cursor. **M0–M9 are shipped and running** (M7: JSONL history +
 History/Settings main window; M8 + M8.1: Liquid Glass UI — `NSGlassEffectView`
 panel (`glass_enabled`/`glass_style` in config), 150ms fade, auto-height,
 chatbot-style main window (chat bubbles + session cards + glass sidebar
 island), Codex-style Settings sections, custom icons in `app/assets/`, ⌘W
-close, region panel centered on the captured selection); remaining v2 work =
-M9–M10 (providers, onboarding installer + `macsist` CLI) — designs in
-`docs/SPEC.md` §5–6.
+close, region panel centered on the captured selection; M9: `providers` list
++ `active_provider` in config, keys in Keychain via `app/keychain.py`,
+provider picker in Settings 연결, restart-free switching, provider-named
+errors); remaining v2 work = M10 (onboarding installer + `macsist` CLI) —
+designs in `docs/SPEC.md` §5–6.
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit

@@ -219,7 +219,11 @@ def main():
             float(audit), _ui_auditor, "audit:", None, True
         )
         print(f"HE_DEBUG_UI_AUDIT: every {audit}s", flush=True)
-    print("Macsist started (menu bar). Config:", str(config.get("server_base_url")))
+    provider = config.active_provider()
+    print(
+        "Macsist started (menu bar). Provider:",
+        f"{provider['name']} ({provider['base_url']})",
+    )
     AppHelper.runEventLoop()
 
 

@@ -163,6 +163,24 @@ class ExplainController:
                 timer.daemon = True
                 timer.start()
             print(f"HE_DEBUG_FOLLOWUP_AFTER: firing at {delays}s", flush=True)
+        # M9 hook: switch the active provider in memory (like a Settings save)
+        # at given times — restart-free switching verification.
+        # Format: "<sec>:<name>[,<sec>:<name>…]"
+        switches = os.environ.get("HE_DEBUG_SET_PROVIDER")
+        if switches:
+            def switch(name):
+                self.config.set("active_provider", name)
+                print(f"debug: active_provider -> {name}", flush=True)
+
+            for item in switches.split(","):
+                delay, _, name = item.partition(":")
+                timer = threading.Timer(
+                    float(delay),
+                    lambda name=name: AppHelper.callAfter(switch, name),
+                )
+                timer.daemon = True
+                timer.start()
+            print(f"HE_DEBUG_SET_PROVIDER: {switches}", flush=True)
         keycycle = os.environ.get("HE_DEBUG_FOLLOWUP_KEYCYCLE")
         if keycycle:
             def cycle():
@@ -328,7 +346,7 @@ class ExplainController:
         ]
         self._stream(
             gen, handle, messages,
-            model=str(self.config.get("vision_model")),
+            model=str(self.config.active_provider()["vision_model"]),
             max_tokens=max_tokens,
             error_suffix=MSG_VISION_HINT,
             mode="region",
@@ -435,6 +453,8 @@ class ExplainController:
                 "gen": gen,
                 "messages": list(messages)
                 + [{"role": "assistant", "content": assistant}],
+                # pinned at session start — switching providers mid-session
+                # may 4xx with the old model name, naming the new provider (M9)
                 "model": model,
                 "max_tokens": max_tokens,
                 "error_suffix": error_suffix,
@@ -447,7 +467,7 @@ class ExplainController:
         if self.history is not None and content.strip():
             self.history.append(
                 mode,
-                model or str(self.config.get("explain_model")),
+                model or str(self.config.active_provider()["explain_model"]),
                 _last_user_text(messages),
                 content,
                 detail,

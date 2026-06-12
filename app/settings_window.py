@@ -5,16 +5,22 @@ header per section, each a rounded card of rows (title + description on the
 left, the control on the right, hairline separators between rows). The old
 "고급 설정" flap is gone: 고급 is just another section and the pane scrolls.
 
-Sections: 연결 (server/models) · 응답 (detail preset) · 단축키 (recorder
+Sections: 연결 (providers — M9) · 응답 (detail preset) · 단축키 (recorder
 buttons) · 모양 (panel font/box sizes + glass style — M8) · 고급 (system
 prompts, sampling, follow-up, template kwargs).
 
-All M0–M6 logic is unchanged: field population, the keycode-based hotkey
-recorder, /v1/models fetch, validation and the explicit Save (which fires
-on_saved → hotkey re-registration + result-panel rebuild).
+M9 — the 연결 section manages the `providers` list: a picker chooses which
+entry the fields below edit (and which becomes `active_provider` on Save).
+Everything is staged in memory (`_providers` deepcopy) and committed by the
+explicit Save, matching the rest of the pane. Typed API keys go to the
+Keychain on Save (staged in a private `_pending_key` field, stripped before
+config.set) — they NEVER reach config.json; the config keeps only the
+Keychain account name in `api_key_env_or_value`.
 """
 
+import copy
 import json
+import re
 import threading
 
 import httpx
@@ -38,6 +44,7 @@ from AppKit import (
     NSScrollView,
     NSSegmentedControl,
     NSSegmentSwitchTrackingSelectOne,
+    NSSwitch,
     NSTextField,
     NSTextView,
     NSViewHeightSizable,
@@ -46,6 +53,7 @@ from AppKit import (
 from Foundation import NSMakeSize
 from PyObjCTools import AppHelper
 
+import keychain
 from config import DEFAULTS
 from hotkeys import format_binding
 from ui_kit import FlippedView, make_pill, make_round_field
@@ -61,6 +69,15 @@ MODEL_FIELDS = [
     ("explain_model", "설명 모델", "텍스트 설명에 사용"),
     ("vision_model", "비전 모델", "화면 캡처 설명에 사용 (멀티모달 모델 필요)"),
 ]
+# M9: template for 추가 — OpenRouter is the documented example endpoint
+NEW_PROVIDER = {
+    "name": "새 프로바이더",
+    "base_url": "https://openrouter.ai/api",
+    "api_key_env_or_value": "",
+    "explain_model": "",
+    "vision_model": "",
+    "is_local": False,
+}
 HOTKEY_FIELDS = [
     ("hotkey_explain_text", "텍스트 설명", "선택한 텍스트를 설명"),
     ("hotkey_explain_region", "영역 설명", "화면 영역을 캡처해 설명"),
@@ -98,6 +115,22 @@ def _pretty_binding(binding):
     )
 
 
+def _unique_account(providers, name):
+    """Keychain account for a provider getting its first key: a slug of the
+    name, de-duplicated against every other staged ref. Stable once stored —
+    later renames don't touch the Keychain. (Module-level: PyObjC selectors
+    can't take plain positional args without underscore naming.)"""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-")
+    base = f"provider-{slug}" if slug else "provider"
+    taken = {
+        str(p.get("api_key_env_or_value", "")).strip() for p in providers
+    }
+    account, n = base, 2
+    while account in taken:
+        account, n = f"{base}-{n}", n + 1
+    return account
+
+
 class SettingsPaneController(NSObject):
     def initWithConfig_(self, config):
         self = objc.super(SettingsPaneController, self).init()
@@ -106,7 +139,16 @@ class SettingsPaneController(NSObject):
         self.config = config
         self.container = None  # host NSView, injected via buildInView_
         self.url_field = None
-        self.model_fields = {}  # config key -> NSComboBox
+        self.model_fields = {}  # provider field -> NSComboBox (M9: per-provider)
+        # M9 provider management — staged in memory, committed on Save
+        self.provider_popup = None
+        self.name_field = None
+        self.key_field = None  # NSSecureTextField
+        self.key_desc_label = None  # doubles as the key status line
+        self.local_switch = None
+        self._providers = []  # deepcopy of config["providers"] being edited
+        self._selected = 0  # index into _providers (edited + active on Save)
+        self._deleted_refs = []  # keychain accounts to delete on Save
         self.hotkey_buttons = {}  # config key -> pill NSButton
         self.detail_control = None  # NSSegmentedControl
         self._detail_keys = []  # segment index -> detail_levels key
@@ -136,9 +178,15 @@ class SettingsPaneController(NSObject):
         """(Re)load every field from config — called each time the Settings
         tab is shown. buildInView_ must have run first."""
         self._endRecording_(None)  # drop a stale recording session, if any
-        self.url_field.setStringValue_(self.config.get("server_base_url"))
-        for key, field in self.model_fields.items():
-            field.setStringValue_(self.config.get(key))
+        self._providers = copy.deepcopy(self.config.get("providers")) or [
+            copy.deepcopy(DEFAULTS["providers"][0])
+        ]
+        self._deleted_refs = []
+        names = [str(p.get("name", "")) for p in self._providers]
+        active = str(self.config.get("active_provider"))
+        self._selected = names.index(active) if active in names else 0
+        self._rebuildProviderPopup()
+        self._loadProviderFields()
         for key, button in self.hotkey_buttons.items():
             self._hotkey_bindings[key] = str(self.config.get(key))
             button.setTitle_(_pretty_binding(self._hotkey_bindings[key]))
@@ -173,8 +221,103 @@ class SettingsPaneController(NSObject):
             json.dumps(self.config.get("chat_template_kwargs"), ensure_ascii=False)
         )
         self.status_label.setStringValue_("")
-        self._refreshModelList()
         print("settings pane refreshed", flush=True)
+
+    # -- provider staging (M9) ---------------------------------------------------
+
+    def _rebuildProviderPopup(self):
+        """Repopulate the picker from the staged list. Items go through the
+        menu directly — NSPopUpButton.addItemWithTitle_ silently drops
+        duplicate titles, and unsaved edits may briefly duplicate names."""
+        popup = self.provider_popup
+        popup.removeAllItems()
+        for entry in self._providers:
+            popup.menu().addItemWithTitle_action_keyEquivalent_(
+                str(entry.get("name", "")), None, ""
+            )
+        popup.selectItemAtIndex_(self._selected)
+
+    def _loadProviderFields(self):
+        entry = self._providers[self._selected]
+        self.name_field.setStringValue_(str(entry.get("name", "")))
+        self.url_field.setStringValue_(str(entry.get("base_url", "")))
+        self.key_field.setStringValue_("")  # never display stored keys
+        self.local_switch.setState_(1 if entry.get("is_local") else 0)
+        for key, field in self.model_fields.items():
+            field.setStringValue_(str(entry.get(key, "")))
+        self._updateKeyStatus()
+        self._refreshModelList()
+
+    def _stashFields(self):
+        """Fields → the staged entry. A typed key moves to the private
+        _pending_key staging slot (committed to the Keychain on Save) and the
+        secure field is cleared immediately."""
+        entry = self._providers[self._selected]
+        entry["name"] = str(self.name_field.stringValue()).strip()
+        entry["base_url"] = str(self.url_field.stringValue()).strip()
+        entry["is_local"] = bool(self.local_switch.state())
+        for key, field in self.model_fields.items():
+            entry[key] = str(field.stringValue()).strip()
+        typed = str(self.key_field.stringValue()).strip()
+        if typed:
+            entry["_pending_key"] = typed
+            self.key_field.setStringValue_("")
+        self._updateKeyStatus()
+
+    def _updateKeyStatus(self):
+        entry = self._providers[self._selected]
+        ref = str(entry.get("api_key_env_or_value", "")).strip()
+        if entry.get("_pending_key"):
+            text = "새 키 입력됨 — 저장 시 Keychain에 보관"
+        elif ref.startswith("env:"):
+            text = f"환경변수 참조 ({ref})"
+        elif ref:
+            text = "키 저장됨 (Keychain) — 비워 두면 유지"
+        else:
+            text = "키 없음 — 입력하면 Keychain에 저장 (로컬 서버는 불필요)"
+        self.key_desc_label.setStringValue_(text)
+
+    def providerChanged_(self, sender):
+        idx = int(sender.indexOfSelectedItem())
+        if idx == self._selected or not 0 <= idx < len(self._providers):
+            return
+        self._stashFields()
+        self._selected = idx
+        self._rebuildProviderPopup()  # pick up a possible rename
+        self._loadProviderFields()
+
+    def addProvider_(self, sender):
+        self._stashFields()
+        entry = dict(NEW_PROVIDER)
+        names = {str(p.get("name", "")) for p in self._providers}
+        if entry["name"] in names:
+            n = 2
+            while f"{entry['name']} {n}" in names:
+                n += 1
+            entry["name"] = f"{entry['name']} {n}"
+        self._providers.append(entry)
+        self._selected = len(self._providers) - 1
+        self._rebuildProviderPopup()
+        self._loadProviderFields()
+        self.status_label.setStringValue_("프로바이더 추가됨 — 저장 시 적용")
+
+    def deleteProvider_(self, sender):
+        if len(self._providers) <= 1:
+            self.status_label.setStringValue_("⚠ 마지막 프로바이더는 삭제할 수 없습니다.")
+            return
+        entry = self._providers.pop(self._selected)
+        ref = str(entry.get("api_key_env_or_value", "")).strip()
+        if ref and not ref.startswith("env:"):
+            self._deleted_refs.append(ref)  # Keychain cleanup on Save
+        self._selected = 0
+        self._rebuildProviderPopup()
+        self._loadProviderFields()
+        self.status_label.setStringValue_(
+            f"'{entry.get('name', '')}' 삭제 예약 — 저장 시 적용"
+        )
+
+    def fetchModels_(self, sender):
+        self._refreshModelList()
 
     # -- build (Codex-style sections + cards) -----------------------------------
 
@@ -241,12 +384,14 @@ class SettingsPaneController(NSObject):
             label.setFont_(NSFont.systemFontOfSize_(FONT_TITLE))
             label.setFrame_(NSMakeRect(ROW_PAD_X, row_y + 12, 460, 19))
             inner.addSubview_(label)
+            sub = None
             if desc:
                 sub = NSTextField.labelWithString_(desc)
                 sub.setFont_(NSFont.systemFontOfSize_(FONT_DESC))
                 sub.setTextColor_(NSColor.secondaryLabelColor())
                 sub.setFrame_(NSMakeRect(ROW_PAD_X, row_y + 36, 520, 17))
                 inner.addSubview_(sub)
+            return sub  # M9: the API-key row repurposes this as a status line
 
         def control_frame(row_y, w, h=28):
             return NSMakeRect(ctrl_x - w, row_y + (ROW_H - h) / 2.0, w, h)
@@ -288,18 +433,79 @@ class SettingsPaneController(NSObject):
                 holder["field"] = field
             return holder, (INPUT_ROW_H, build)
 
-        # ---- 연결 ----
+        # ---- 연결 (M9: provider picker + per-provider fields) ----
         section("연결")
+
+        def build_picker(inner, row_y):
+            titled(inner, row_y, "활성 프로바이더",
+                   "요청에 사용할 엔드포인트 — 아래 필드로 편집, 저장 시 적용")
+            popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                control_frame(row_y, 260), False
+            )
+            popup.setTarget_(self)
+            popup.setAction_("providerChanged:")
+            inner.addSubview_(popup)
+            self.provider_popup = popup
+
+        def build_manage(inner, row_y):
+            titled(inner, row_y, "프로바이더 관리",
+                   "추가는 OpenRouter 템플릿으로 — 삭제·추가 모두 저장 시 적용")
+            inner.addSubview_(make_pill(
+                "추가", self, "addProvider:",
+                NSMakeRect(ctrl_x - 188, row_y + (ROW_H - 30) / 2, 90, 30),
+            ))
+            inner.addSubview_(make_pill(
+                "삭제", self, "deleteProvider:",
+                NSMakeRect(ctrl_x - 90, row_y + (ROW_H - 30) / 2, 90, 30),
+            ))
+        card([(ROW_H, build_picker), (ROW_H, build_manage)])
+
+        name_holder, name_row = input_row("이름", "프로바이더 표시 이름")
         url_holder, url_row = input_row(
-            "서버 주소", "로컬 MLX 프록시 또는 OpenAI 호환 엔드포인트"
+            "서버 주소",
+            "OpenAI 호환 엔드포인트 (예: https://openrouter.ai/api)",
         )
+
+        key_holder = {}
+
+        def build_key(inner, row_y):
+            # input_row twin, but secure + a handle on the desc label so it
+            # can double as the Keychain status line
+            self.key_desc_label = titled(inner, row_y, "API 키", " ")
+            box, field = make_round_field(
+                NSMakeRect(ROW_PAD_X, row_y + 58,
+                           card_w - 2 * ROW_PAD_X, 34),
+                FONT_FIELD, secure=True,
+            )
+            inner.addSubview_(box)
+            key_holder["field"] = field
+
+        def build_local(inner, row_y):
+            titled(inner, row_y, "로컬 서버",
+                   "켜면 /health 폴링 + chat_template_kwargs 전송")
+            switch = NSSwitch.alloc().initWithFrame_(
+                control_frame(row_y, 42, 25)
+            )
+            inner.addSubview_(switch)
+            self.local_switch = switch
+
         model_holders, model_rows = [], []
         for key, title, desc in MODEL_FIELDS:
             holder, row = field_row(title, desc, field_class=NSComboBox)
             model_holders.append((key, holder))
             model_rows.append(row)
-        card([url_row] + model_rows)
+
+        def build_fetch(inner, row_y):
+            titled(inner, row_y, "모델 목록",
+                   "서버 주소에서 /v1/models 조회해 자동완성 갱신")
+            inner.addSubview_(make_pill(
+                "새로고침", self, "fetchModels:", control_frame(row_y, 110, 30)
+            ))
+        card([name_row, url_row, (INPUT_ROW_H, build_key),
+              (ROW_H, build_local)] + model_rows + [(ROW_H, build_fetch)])
+        self.name_field = name_holder["field"]
         self.url_field = url_holder["field"]
+        self.key_field = key_holder["field"]
         for key, holder in model_holders:
             holder["field"].setCompletes_(True)
             self.model_fields[key] = holder["field"]
@@ -534,10 +740,28 @@ class SettingsPaneController(NSObject):
     def _refreshModelList(self):
         base_url = str(self.url_field.stringValue()).strip().rstrip("/")
         timeout = float(self.config.get("request_connect_timeout"))
+        # M9: authenticate like a real request would — a just-typed key wins,
+        # then a staged pending key, then the stored Keychain/env reference
+        # (resolved inside the fetch thread: it's a subprocess)
+        entry = self._providers[self._selected] if self._providers else {}
+        typed = str(self.key_field.stringValue()).strip() if self.key_field else ""
+        pending = str(entry.get("_pending_key", ""))
+        ref = str(entry.get("api_key_env_or_value", ""))
 
         def fetch():
+            headers = {}
+            key = typed or pending
+            if not key:
+                try:
+                    key = keychain.resolve_key(ref)
+                except keychain.KeychainError:
+                    key = None
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
             try:
-                resp = httpx.get(f"{base_url}/v1/models", timeout=timeout)
+                resp = httpx.get(
+                    f"{base_url}/v1/models", timeout=timeout, headers=headers
+                )
                 resp.raise_for_status()
                 ids = [m["id"] for m in resp.json().get("data", []) if m.get("id")]
             except Exception:
@@ -629,18 +853,63 @@ class SettingsPaneController(NSObject):
             values["chat_template_kwargs"] = kwargs
         return values, None
 
+    def _validateProviders(self):
+        names = [str(p.get("name", "")).strip() for p in self._providers]
+        if any(not n for n in names):
+            return "프로바이더 이름이 비어 있습니다."
+        if len(set(names)) != len(names):
+            return "프로바이더 이름이 중복됩니다."
+        for entry in self._providers:
+            if not str(entry.get("base_url", "")).startswith("http"):
+                return f"'{entry['name']}' 서버 주소는 http(s)://로 시작해야 합니다."
+        if not str(self._providers[self._selected].get("explain_model", "")).strip():
+            return "활성 프로바이더의 설명 모델이 비어 있습니다."
+        return None
+
+    def _commitKeychain(self):
+        """Pending keys → Keychain; deferred deletions. Only on full success
+        are the staging slots cleared, so a failed Save can simply be retried
+        (set_key -U is idempotent). Raises KeychainError."""
+        for entry in self._providers:
+            secret = entry.get("_pending_key")
+            if not secret:
+                continue
+            ref = str(entry.get("api_key_env_or_value", "")).strip()
+            if not ref or ref.startswith("env:"):
+                ref = _unique_account(self._providers, entry["name"])
+            keychain.set_key(ref, secret)
+            entry["api_key_env_or_value"] = ref
+        for ref in self._deleted_refs:
+            keychain.delete_key(ref)
+        self._deleted_refs = []
+        for entry in self._providers:
+            entry.pop("_pending_key", None)
+        self._updateKeyStatus()
+
     def save_(self, sender):
         self._endRecording_(None)
-        appearance, error = self._collectAppearance()
+        self._stashFields()
+        error = self._validateProviders()
+        appearance = advanced = None
+        if error is None:
+            appearance, error = self._collectAppearance()
         if error is None:
             advanced, error = self._collectAdvanced()
         if error:
             self.status_label.setStringValue_("⚠ " + error)
             print("settings NOT saved:", error, flush=True)
             return
-        self.config.set("server_base_url", str(self.url_field.stringValue()).strip())
-        for key, field in self.model_fields.items():
-            self.config.set(key, str(field.stringValue()).strip())
+        try:
+            self._commitKeychain()
+        except keychain.KeychainError as err:
+            self.status_label.setStringValue_("⚠ " + str(err))
+            print("settings NOT saved:", err, flush=True)
+            return
+        self.config.set("providers", copy.deepcopy(self._providers))
+        self.config.set(
+            "active_provider", self._providers[self._selected]["name"]
+        )
+        self._rebuildProviderPopup()  # pick up renames
         for key, binding in self._hotkey_bindings.items():
             if binding:
                 self.config.set(key, binding)
@@ -655,9 +924,11 @@ class SettingsPaneController(NSObject):
         if self.on_saved is not None:
             self.on_saved()  # re-register hotkeys + rebuild the result panel
         self.status_label.setStringValue_("저장됨 ✓")
+        active = self.config.active_provider()  # never log keys, only refs
         print(
-            "settings saved:", self.config.get("server_base_url"),
-            self.config.get("explain_model"), self.config.get("vision_model"),
+            "settings saved:",
+            f"provider={active['name']} ({active['base_url']})",
+            active["explain_model"], active["vision_model"],
             self.config.get("hotkey_explain_text"),
             self.config.get("hotkey_explain_region"),
             "detail=" + str(self.config.get("explain_detail")),

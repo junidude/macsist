@@ -1,4 +1,4 @@
-"""ServerHealthMonitor — background /health polling for the menu bar (M5).
+"""ServerHealthMonitor — background health polling for the menu bar (M5).
 
 States: "unknown" (startup) → "ok" | "loading" | "down".
   ok      — proxy answered {"status": "ok"} (all expected backends ready)
@@ -6,6 +6,11 @@ States: "unknown" (startup) → "ok" | "loading" | "down".
             its model; the supervisor guarantees "proxy up + backend
             unreachable" can only mean that)
   down    — the proxy itself is unreachable
+
+M9: the active provider is re-read every poll (live switching). Local
+providers keep the /health contract above; external ones have no /health,
+so they're probed via GET /v1/models with the Bearer key — 2xx is "ok",
+anything else "down" ("loading" is local-only by construction).
 
 Threading: one daemon thread, created once at startup. State changes are
 marshalled to the main thread via AppHelper.callAfter before on_change fires
@@ -17,6 +22,8 @@ import threading
 
 import httpx
 from PyObjCTools import AppHelper
+
+import keychain
 
 
 class ServerHealthMonitor:
@@ -59,8 +66,11 @@ class ServerHealthMonitor:
             self._wake.clear()
 
     def _poll_once(self):
-        # read config each poll so a server URL change applies live
-        base_url = str(self.config.get("server_base_url")).rstrip("/")
+        # read config each poll so a provider switch applies live
+        provider = self.config.active_provider()
+        base_url = str(provider["base_url"]).rstrip("/")
+        if not provider["is_local"]:
+            return self._poll_external(provider, base_url)
         timeout = float(self.config.get("health_poll_timeout"))
         try:
             resp = httpx.get(f"{base_url}/health", timeout=timeout)
@@ -73,3 +83,20 @@ class ServerHealthMonitor:
         except ValueError:
             return "down"
         return "ok" if status == "ok" else "loading"
+
+    def _poll_external(self, provider, base_url):
+        timeout = float(self.config.get("health_poll_timeout_external"))
+        headers = {}
+        try:
+            api_key = keychain.resolve_key(provider["api_key_env_or_value"])
+        except keychain.KeychainError:
+            return "down"  # never crash the daemon thread
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            resp = httpx.get(
+                f"{base_url}/v1/models", timeout=timeout, headers=headers
+            )
+        except httpx.HTTPError:
+            return "down"
+        return "ok" if resp.is_success else "down"

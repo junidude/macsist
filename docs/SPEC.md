@@ -109,8 +109,9 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `hotkeys.py` | pynput listener; **vk-based matching** (`_VkHotKey`), `format_binding`, pause/rebind, TIS main-thread patch |
 | `text_capture.py` | AX read → synthetic-⌘C fallback (capture lock, restore-only-if-changed, Maccy modifier recipe) |
 | `region_capture.py` | `screencapture -i` subprocess, PNG IHDR dims, `sips -Z` downscale, data-URL |
-| `llm_client.py` | httpx SSE client; `StreamHandle.cancel()` (raw socket shutdown); `on_reasoning`; per-call `model`/`max_tokens` override; 503 `model_loading` → "모델 로딩 중" |
-| `health.py` | `ServerHealthMonitor` — `/health` polling thread, ok/loading/down, `poke()` |
+| `llm_client.py` | httpx SSE client; `StreamHandle.cancel()` (raw socket shutdown); `on_reasoning`; per-call `model`/`max_tokens` override; M9: resolves `active_provider()` per request (Bearer auth via keychain, `chat_template_kwargs` local-only, provider-named errors, 503 `model_loading` → "모델 로딩 중") |
+| `health.py` | `ServerHealthMonitor` — polling thread, ok/loading/down, `poke()`; M9: local providers `GET /health`, external authed `GET /v1/models` |
+| `keychain.py` | M9 — `security` CLI wrapper (`set/get/delete_key`, `resolve_key`: ""/`env:VAR`/account); keys never in config/logs |
 | `result_panel.py` | floating panel — never-key except while the follow-up input is focused (`_allow_key` gate, M6); NSEvent monitors for dismiss/click-to-focus/two-stage Esc; streaming transcript + bottom input row |
 | `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping); M7 history commit + `resubmit_text` (re-ask) |
 | `settings_window.py` | `SettingsPaneController` — settings controls built into a host view (combos / recorders / detail segments / 고급 flap); window-less since M7 |
@@ -120,7 +121,10 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `run.sh` / `deploy.sh` | dev run / launchd deploy |
 
 ### Config reference (all tunables live here)
-`server_base_url`, `explain_model`, `vision_model`, `alt_model`, `agent_model`,
+`providers` (M9 — ordered `{name, base_url, api_key_env_or_value,
+explain_model, vision_model, is_local}` entries; pre-M9 `server_base_url`/
+`explain_model`/`vision_model` are auto-migrated into `providers[0]`),
+`active_provider` (name), `alt_model`, `agent_model`,
 `system_prompt_text`, `system_prompt_image`, `user_prompt_image`,
 `explain_detail` + `detail_levels` (label / prompt_suffix / max_tokens),
 `hotkey_explain_text` (default `<cmd>+<shift>+e`), `hotkey_explain_region`
@@ -131,6 +135,8 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 `region_max_dim`, `panel_width`, `panel_height`, `panel_height_expanded`,
 `panel_cursor_offset`, `followup_max_turns`,
 `health_poll_interval`, `health_poll_timeout`,
+`health_poll_timeout_external` (M9 — external providers are health-checked
+via authed `GET /v1/models` over the internet),
 `history_enabled` (master) / `history_save_text` / `history_save_images`
 (per-mode), `history_max_items`, `history_snippet_chars`
 (= `capture_max_chars` by default so text inputs are stored losslessly for
@@ -155,6 +161,9 @@ appearance for reproducible light/dark runs), `HE_DEBUG_UI_AUDIT=<sec>`
 (repeating structured `ui-audit panel:`/`ui-audit window:` lines — backdrop
 class, cornerRadius, border RGBA, alpha, visible/key, toolbar items, sidebar
 material, tab type).
+M9: `HE_DEBUG_SET_PROVIDER="<sec>:<name>[,<sec>:<name>…]"` (switch
+`active_provider` in memory at each delay, like a Settings save —
+restart-free provider-switch verification).
 
 ---
 
@@ -323,6 +332,13 @@ For users whose machines can't host a local LLM.
   live `/v1/models` fetch when the endpoint supports it); per-provider model
   fields. Switching provider applies to the next request (no restart).
 - Errors must say which provider failed.
+- *(As built, M9)* `base_url` excludes `/v1` — the client appends
+  `/v1/chat/completions` (so OpenAI = `https://api.openai.com`, OpenRouter =
+  `https://openrouter.ai/api`). `api_key_env_or_value` forms: `""` (no auth),
+  `env:VAR`, else a Keychain account under service `com.macsist`
+  (`keychain.py`; accounts are `provider-<slug>`, stable across renames).
+  External health = authed `GET /v1/models` (`health_poll_timeout_external`);
+  `loading` state stays local-only.
 
 ### 5.5 Onboarding installer (M10a)
 `install.sh` at repo root (curl-able one-liner once public):
@@ -448,10 +464,27 @@ memory `verify-ui-without-screenshots`).
   pixel-verification harness (offscreen `cacheDisplayInRect` — white text
   pixels counted on the accent bubble) caught the NSBox
   `contentViewMargins`/`cellSizeForBounds` clipping bugs.
-- **M9 — External providers** (§5.4).
+- **M9 — External providers** (§5.4). **Shipped 2026-06-12.**
   *AC:* add an OpenRouter (or OpenAI) provider with a key → explain works with
   the local server stopped; key lives in Keychain; switching back needs no
   restart.
+  *AC verified (HE_DEBUG runs, OpenAI gpt-4o-mini):* with
+  `com.macsist.llm-server` booted out, text + region explains streamed Korean
+  answers via `api.openai.com` and the menubar health went `ok` through the
+  authed `/v1/models` probe; key stored as Keychain item
+  `com.macsist`/`provider-openai` (config.json holds only that account name —
+  grep for key material: 0 hits); `HE_DEBUG_SET_PROVIDER="6:로컬 서버"` mid-run
+  switched request 2 back to `127.0.0.1:8000` in the same process (local
+  proxy log shows the POST); bogus key → panel error "OpenAI 인증 실패
+  (HTTP 401) — API 키를 확인하세요" (provider-named, per spec); pre-M9 config
+  auto-migrated (`server_base_url`+models → `providers[0]`, customized 27B
+  explain model preserved, second load idempotent); `keychain.py` CLI
+  round-trip + `-U` update + missing→None + idempotent delete all pass.
+  Settings 연결 section rebuilt as provider picker + add/delete pills +
+  per-provider fields (name / URL / secure key with Keychain-status line /
+  로컬 서버 switch / model combos / authed 모델 새로고침) — staged in memory,
+  committed on Save; typed keys go Keychain-only via a `_pending_key`
+  staging slot stripped before `config.set`.
 - **M10 — Onboarding + CLI** (§5.5–5.6).
   *AC:* on a machine state simulating "nothing installed", `install.sh` reaches
   a working explain in one session (both the local and the API path);
