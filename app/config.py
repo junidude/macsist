@@ -19,12 +19,15 @@ DEFAULTS = {
     "alt_model": "mlx-community/Gemma-4-12B-4bit",
     "agent_model": "mlx-community/Qwen3.6-27B-4bit",
     "system_prompt_text": (
-        "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트의 핵심을 3~5문장으로 "
-        "설명하고, 전문용어는 짧게 풀어줘. 군더더기 금지."
+        "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트가 한국어가 아니면"
+        "(영어/중국어/일본어 등) 먼저 '번역:'으로 시작하는 자연스러운 한국어 "
+        "번역을 제시하고(긴 글이면 핵심 위주로), 그다음 핵심을 3~5문장으로 "
+        "설명해. 전문용어는 짧게 풀어줘. 군더더기 금지."
     ),
     "system_prompt_image": (
-        "너는 한국어로 답하는 간결한 해설가다. 이미지의 핵심 내용을 설명하고, "
-        "표/코드/도식이면 의미를 풀어줘. 3~6문장."
+        "너는 한국어로 답하는 간결한 해설가다. 이미지 속 텍스트가 한국어가 "
+        "아니면 먼저 '번역:'으로 시작하는 한국어 번역을 제시한 뒤 설명해. "
+        "이미지의 핵심 내용을 설명하고, 표/코드/도식이면 의미를 풀어줘. 3~6문장."
     ),
     "user_prompt_image": "이 이미지를 한국어로 간결하게 설명해줘.",
     # Detail presets: suffix is appended to the system prompt (text & image),
@@ -76,6 +79,22 @@ DEFAULTS = {
 }
 
 
+# Old default values superseded by later versions. save() writes every key to
+# disk, so an untouched default would otherwise be pinned forever; if the
+# on-disk value still equals a stale default the user never customized it —
+# drop it and let the current default apply. Customized values are never touched.
+_SUPERSEDED_DEFAULTS = {
+    "system_prompt_text": (
+        "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트의 핵심을 3~5문장으로 "
+        "설명하고, 전문용어는 짧게 풀어줘. 군더더기 금지.",
+    ),
+    "system_prompt_image": (
+        "너는 한국어로 답하는 간결한 해설가다. 이미지의 핵심 내용을 설명하고, "
+        "표/코드/도식이면 의미를 풀어줘. 3~6문장.",
+    ),
+}
+
+
 class ConfigStore:
     def __init__(self):
         self._data = dict(DEFAULTS)
@@ -87,6 +106,9 @@ class ConfigStore:
                 on_disk = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 on_disk = {}
+            for key, stale_values in _SUPERSEDED_DEFAULTS.items():
+                if on_disk.get(key) in stale_values:
+                    del on_disk[key]
             self._data = {**DEFAULTS, **on_disk}
         else:
             self.save()

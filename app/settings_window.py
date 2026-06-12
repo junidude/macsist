@@ -8,8 +8,15 @@ Model fields are editable NSComboBoxes: the dropdown lists the models
 currently loaded on the server (/v1/models, fetched on a background thread
 each time the window opens), while free text keeps working when the server is
 down or for a model id not in the list.
+
+The "고급 설정" toggle expands the window with the fields most LLM UIs hide
+behind an Advanced flap: the system prompts (e.g. translate-first behavior),
+image user prompt, temperature, max_tokens, follow-up turn cap and
+chat_template_kwargs. Top-anchored views carry NSViewMinYMargin so the window
+can resize from the bottom edge; the save row sticks to the bottom.
 """
 
+import json
 import threading
 
 import httpx
@@ -25,17 +32,21 @@ from AppKit import (
     NSEventModifierFlagControl,
     NSEventModifierFlagOption,
     NSEventModifierFlagShift,
+    NSFont,
     NSMakeRect,
     NSObject,
     NSSegmentedControl,
     NSSegmentSwitchTrackingSelectOne,
     NSTextField,
+    NSTextView,
+    NSViewMinYMargin,
     NSWindow,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskTitled,
 )
 from PyObjCTools import AppHelper
 
+from config import DEFAULTS
 from hotkeys import format_binding
 
 _ESC_KEYCODE = 53
@@ -45,6 +56,10 @@ MODEL_FIELDS = [("explain_model", "Explain model"), ("vision_model", "Vision mod
 HOTKEY_FIELDS = [
     ("hotkey_explain_text", "Explain hotkey"),
     ("hotkey_explain_region", "Region hotkey"),
+]
+ADV_PROMPT_FIELDS = [
+    ("system_prompt_text", "System prompt\n(텍스트)"),
+    ("system_prompt_image", "System prompt\n(이미지)"),
 ]
 
 
@@ -59,6 +74,7 @@ LABEL_WIDTH = 110
 FIELD_WIDTH = 330
 ROW_HEIGHT = 24
 ROW_GAP = 12
+PROMPT_HEIGHT = 64
 
 
 class SettingsWindowController(NSObject):
@@ -74,6 +90,19 @@ class SettingsWindowController(NSObject):
         self.detail_control = None  # NSSegmentedControl
         self._detail_keys = []  # segment index -> detail_levels key
         self.status_label = None
+        # advanced section (system prompts, sampling, follow-up, kwargs)
+        self.prompt_views = {}  # config key -> NSTextView
+        self.user_prompt_image_field = None
+        self.temperature_field = None
+        self.max_tokens_field = None
+        self.followup_field = None
+        self.template_kwargs_field = None
+        self.advanced_button = None
+        self._advanced_views = []
+        self._advanced_visible = False
+        self._collapsed_height = 0
+        self._expanded_height = 0
+        self._win_width = 0
         self.on_saved = None  # set by main.py: ExplainController.reloadHotkeys
         self.on_record_changed = None  # set by main.py: pause hotkeys while recording
         self._hotkey_bindings = {}  # config key -> pynput format, saved on Save
@@ -94,6 +123,19 @@ class SettingsWindowController(NSObject):
         current = str(self.config.get("explain_detail"))
         if current in self._detail_keys:
             self.detail_control.setSelectedSegment_(self._detail_keys.index(current))
+        for key, text_view in self.prompt_views.items():
+            text_view.setString_(str(self.config.get(key)))
+        self.user_prompt_image_field.setStringValue_(
+            str(self.config.get("user_prompt_image"))
+        )
+        self.temperature_field.setStringValue_(str(self.config.get("temperature")))
+        self.max_tokens_field.setStringValue_(str(self.config.get("max_tokens")))
+        self.followup_field.setStringValue_(
+            str(self.config.get("followup_max_turns"))
+        )
+        self.template_kwargs_field.setStringValue_(
+            json.dumps(self.config.get("chat_template_kwargs"), ensure_ascii=False)
+        )
         self.status_label.setStringValue_("")
         self._refreshModelList()
         import os
@@ -111,8 +153,21 @@ class SettingsWindowController(NSObject):
 
     def _buildWindow(self):
         width = PADDING * 2 + LABEL_WIDTH + 8 + FIELD_WIDTH
-        rows = 2 + len(MODEL_FIELDS) + len(HOTKEY_FIELDS)  # + save row below
-        height = PADDING * 2 + ROW_HEIGHT * (rows + 1) + ROW_GAP * rows
+        self._win_width = width
+        basic_rows = 2 + len(MODEL_FIELDS) + len(HOTKEY_FIELDS)
+        self._collapsed_height = (
+            PADDING * 2 + ROW_HEIGHT * (basic_rows + 1) + ROW_GAP * basic_rows
+        )
+        # advanced flap: 2 prompt editors + 3 field rows + reset row
+        self._expanded_height = (
+            self._collapsed_height
+            + len(ADV_PROMPT_FIELDS) * (PROMPT_HEIGHT + ROW_GAP)
+            + 4 * (ROW_HEIGHT + ROW_GAP)
+        )
+        # Build at EXPANDED height (all frames laid out top-down), then
+        # collapse: top-anchored views carry NSViewMinYMargin, so shrinking
+        # the window pushes the advanced rows below the content bounds.
+        height = self._expanded_height
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, width, height),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
@@ -121,39 +176,48 @@ class SettingsWindowController(NSObject):
         )
         self.window.setTitle_("HotkeyExplain Settings")
         self.window.setReleasedWhenClosed_(False)
-        self.window.center()
         content = self.window.contentView()
 
-        def row_y(row_index):
-            return height - PADDING - ROW_HEIGHT * (row_index + 1) - ROW_GAP * row_index
+        y_cursor = [height - PADDING]
 
-        def add_label(row_index, text):
+        def place(h):
+            y_cursor[0] -= h
+            y = y_cursor[0]
+            y_cursor[0] -= ROW_GAP
+            return y
+
+        def pin(view, advanced=False):
+            view.setAutoresizingMask_(NSViewMinYMargin)  # track the top edge
+            content.addSubview_(view)
+            if advanced:
+                self._advanced_views.append(view)
+
+        def add_label_at(y, text, advanced=False, x=PADDING, w=LABEL_WIDTH,
+                         h=ROW_HEIGHT):
             label = NSTextField.labelWithString_(text)
-            label.setFrame_(
-                NSMakeRect(PADDING, row_y(row_index), LABEL_WIDTH, ROW_HEIGHT)
-            )
-            content.addSubview_(label)
+            label.setFrame_(NSMakeRect(x, y, w, h))
+            pin(label, advanced)
+            return label
 
-        def add_row(row_index, label_text, field_class=NSTextField):
-            add_label(row_index, label_text)
+        def add_row(label_text, field_class=NSTextField, advanced=False):
+            y = place(ROW_HEIGHT)
+            add_label_at(y, label_text, advanced)
             field = field_class.alloc().initWithFrame_(
                 NSMakeRect(
-                    PADDING + LABEL_WIDTH + 8, row_y(row_index),
-                    FIELD_WIDTH, ROW_HEIGHT,
+                    PADDING + LABEL_WIDTH + 8, y, FIELD_WIDTH, ROW_HEIGHT
                 )
             )
-            content.addSubview_(field)
+            pin(field, advanced)
             return field
 
-        row = 0
-        self.url_field = add_row(row, "Server URL")
+        # -- basic section --
+        self.url_field = add_row("Server URL")
         for key, label in MODEL_FIELDS:
-            row += 1
-            field = add_row(row, label, NSComboBox)
+            field = add_row(label, NSComboBox)
             field.setCompletes_(True)
             self.model_fields[key] = field
-        row += 1
-        add_label(row, "Detail")
+        y = place(ROW_HEIGHT)
+        add_label_at(y, "Detail")
         levels = self.config.get("detail_levels")
         self._detail_keys = list(levels.keys())
         labels = [str(levels[k].get("label", k)) for k in self._detail_keys]
@@ -163,32 +227,158 @@ class SettingsWindowController(NSObject):
             )
         )
         self.detail_control.setFrame_(
-            NSMakeRect(PADDING + LABEL_WIDTH + 8, row_y(row), 220, ROW_HEIGHT)
+            NSMakeRect(PADDING + LABEL_WIDTH + 8, y, 220, ROW_HEIGHT)
         )
-        content.addSubview_(self.detail_control)
+        pin(self.detail_control)
 
         for key, label in HOTKEY_FIELDS:
-            row += 1
-            add_label(row, label)
+            y = place(ROW_HEIGHT)
+            add_label_at(y, label)
             button = NSButton.buttonWithTitle_target_action_(
                 "", self, "recordHotkey:"
             )
             button.setFrame_(
-                NSMakeRect(PADDING + LABEL_WIDTH + 8, row_y(row), 160, ROW_HEIGHT)
+                NSMakeRect(PADDING + LABEL_WIDTH + 8, y, 160, ROW_HEIGHT)
             )
-            content.addSubview_(button)
+            pin(button)
             self.hotkey_buttons[key] = button
 
+        # -- advanced section (hidden until toggled) --
+        for key, label in ADV_PROMPT_FIELDS:
+            y = place(PROMPT_HEIGHT)
+            label_view = add_label_at(
+                y, label, advanced=True, h=PROMPT_HEIGHT
+            )
+            label_view.setFont_(NSFont.systemFontOfSize_(12.0))
+            scroll = NSTextView.scrollableTextView()
+            scroll.setFrame_(
+                NSMakeRect(
+                    PADDING + LABEL_WIDTH + 8, y, FIELD_WIDTH, PROMPT_HEIGHT
+                )
+            )
+            text_view = scroll.documentView()
+            text_view.setRichText_(False)
+            text_view.setFont_(NSFont.systemFontOfSize_(12.0))
+            # prompts are data, not prose — no smart quotes/dashes/replacements
+            text_view.setAutomaticQuoteSubstitutionEnabled_(False)
+            text_view.setAutomaticDashSubstitutionEnabled_(False)
+            text_view.setAutomaticTextReplacementEnabled_(False)
+            pin(scroll, advanced=True)
+            self.prompt_views[key] = text_view
+
+        self.user_prompt_image_field = add_row(
+            "Image user prompt", advanced=True
+        )
+
+        y = place(ROW_HEIGHT)
+        add_label_at(y, "Temperature", advanced=True)
+        self.temperature_field = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(PADDING + LABEL_WIDTH + 8, y, 70, ROW_HEIGHT)
+        )
+        pin(self.temperature_field, advanced=True)
+        x = PADDING + LABEL_WIDTH + 8 + 70 + 16
+        add_label_at(y, "Max tokens", advanced=True, x=x, w=85)
+        self.max_tokens_field = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(x + 85 + 4, y, 70, ROW_HEIGHT)
+        )
+        pin(self.max_tokens_field, advanced=True)
+
+        y = place(ROW_HEIGHT)
+        add_label_at(y, "Follow-up 턴 수", advanced=True)
+        self.followup_field = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(PADDING + LABEL_WIDTH + 8, y, 70, ROW_HEIGHT)
+        )
+        pin(self.followup_field, advanced=True)
+        x = PADDING + LABEL_WIDTH + 8 + 70 + 16
+        add_label_at(y, "Template kwargs", advanced=True, x=x, w=110)
+        self.template_kwargs_field = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(x + 110 + 4, y, width - PADDING - (x + 110 + 4), ROW_HEIGHT)
+        )
+        pin(self.template_kwargs_field, advanced=True)
+
+        y = place(ROW_HEIGHT)
+        reset_button = NSButton.buttonWithTitle_target_action_(
+            "고급 기본값 복원", self, "resetAdvanced:"
+        )
+        reset_button.setFrame_(
+            NSMakeRect(PADDING + LABEL_WIDTH + 8, y, 160, ROW_HEIGHT)
+        )
+        pin(reset_button, advanced=True)
+
+        # -- bottom row (sticks to the bottom edge: default autoresizing) --
         button_y = PADDING
         save_button = NSButton.buttonWithTitle_target_action_("Save", self, "save:")
         save_button.setFrame_(NSMakeRect(width - PADDING - 80, button_y, 80, ROW_HEIGHT))
         content.addSubview_(save_button)
 
+        self.advanced_button = NSButton.buttonWithTitle_target_action_(
+            "고급 설정 ▾", self, "toggleAdvanced:"
+        )
+        self.advanced_button.setFrame_(
+            NSMakeRect(PADDING, button_y, 110, ROW_HEIGHT)
+        )
+        content.addSubview_(self.advanced_button)
+
         self.status_label = NSTextField.labelWithString_("")
         self.status_label.setFrame_(
-            NSMakeRect(PADDING, button_y, width - PADDING * 2 - 90, ROW_HEIGHT)
+            NSMakeRect(
+                PADDING + 118, button_y, width - PADDING * 2 - 118 - 90, ROW_HEIGHT
+            )
         )
         content.addSubview_(self.status_label)
+
+        for view in self._advanced_views:
+            view.setHidden_(True)
+        self._setContentHeight_animate_(self._collapsed_height, False)
+        self.window.center()
+
+    def _setContentHeight_animate_(self, target_height, animate):
+        frame_rect = self.window.frameRectForContentRect_(
+            NSMakeRect(0, 0, self._win_width, target_height)
+        )
+        old = self.window.frame()
+        self.window.setFrame_display_animate_(
+            NSMakeRect(
+                old.origin.x,
+                old.origin.y + old.size.height - frame_rect.size.height,
+                frame_rect.size.width,
+                frame_rect.size.height,
+            ),
+            True,
+            animate,
+        )
+
+    def toggleAdvanced_(self, sender):
+        self._advanced_visible = not self._advanced_visible
+        for view in self._advanced_views:
+            view.setHidden_(not self._advanced_visible)
+        self._setContentHeight_animate_(
+            self._expanded_height if self._advanced_visible
+            else self._collapsed_height,
+            True,
+        )
+        self.advanced_button.setTitle_(
+            "고급 설정 ▴" if self._advanced_visible else "고급 설정 ▾"
+        )
+        print(
+            "advanced settings", "shown" if self._advanced_visible else "hidden",
+            "frame:", self.window.frame(), flush=True,
+        )
+
+    def resetAdvanced_(self, sender):
+        """Reset the advanced FIELDS to the shipped defaults — applied on Save."""
+        for key, text_view in self.prompt_views.items():
+            text_view.setString_(str(DEFAULTS[key]))
+        self.user_prompt_image_field.setStringValue_(
+            str(DEFAULTS["user_prompt_image"])
+        )
+        self.temperature_field.setStringValue_(str(DEFAULTS["temperature"]))
+        self.max_tokens_field.setStringValue_(str(DEFAULTS["max_tokens"]))
+        self.followup_field.setStringValue_(str(DEFAULTS["followup_max_turns"]))
+        self.template_kwargs_field.setStringValue_(
+            json.dumps(DEFAULTS["chat_template_kwargs"], ensure_ascii=False)
+        )
+        self.status_label.setStringValue_("기본값 복원됨 — Save로 적용")
 
     # -- hotkey recorder ------------------------------------------------------
     # Click a hotkey button → the next key combo becomes that binding. Captured
@@ -277,8 +467,58 @@ class SettingsWindowController(NSObject):
             field.setStringValue_(typed)
         print("model list refreshed:", ids, flush=True)
 
+    def _collectAdvanced(self):
+        """Validate the advanced fields → (values dict, None) or (None, error).
+        Always collected, even with the flap closed — show() loaded the fields
+        from config, so saving them back unchanged is a no-op."""
+        values = {}
+        for key, text_view in self.prompt_views.items():
+            text = str(text_view.string()).strip()
+            if not text:
+                return None, "System prompt가 비어 있습니다."
+            values[key] = text
+        user_prompt = str(self.user_prompt_image_field.stringValue()).strip()
+        if not user_prompt:
+            return None, "Image user prompt가 비어 있습니다."
+        values["user_prompt_image"] = user_prompt
+        try:
+            values["temperature"] = float(
+                str(self.temperature_field.stringValue()).strip()
+            )
+        except ValueError:
+            return None, "Temperature는 숫자여야 합니다."
+        try:
+            values["max_tokens"] = int(
+                str(self.max_tokens_field.stringValue()).strip()
+            )
+        except ValueError:
+            return None, "Max tokens는 정수여야 합니다."
+        try:
+            values["followup_max_turns"] = int(
+                str(self.followup_field.stringValue()).strip()
+            )
+        except ValueError:
+            return None, "Follow-up 턴 수는 정수여야 합니다."
+        kwargs_text = str(self.template_kwargs_field.stringValue()).strip()
+        if not kwargs_text:
+            values["chat_template_kwargs"] = {}
+        else:
+            try:
+                kwargs = json.loads(kwargs_text)
+            except ValueError:
+                return None, 'Template kwargs는 JSON이어야 합니다 (예: {"enable_thinking": false})'
+            if not isinstance(kwargs, dict):
+                return None, "Template kwargs는 JSON 객체여야 합니다."
+            values["chat_template_kwargs"] = kwargs
+        return values, None
+
     def save_(self, sender):
         self._endRecording_(None)
+        advanced, error = self._collectAdvanced()
+        if error:
+            self.status_label.setStringValue_("⚠ " + error)
+            print("settings NOT saved:", error, flush=True)
+            return
         self.config.set("server_base_url", str(self.url_field.stringValue()).strip())
         for key, field in self.model_fields.items():
             self.config.set(key, str(field.stringValue()).strip())
@@ -288,6 +528,8 @@ class SettingsWindowController(NSObject):
         selected = self.detail_control.selectedSegment()
         if 0 <= selected < len(self._detail_keys):
             self.config.set("explain_detail", self._detail_keys[selected])
+        for key, value in advanced.items():
+            self.config.set(key, value)
         self.config.save()
         if self.on_saved is not None:
             self.on_saved()  # re-register the global hotkeys with new bindings
@@ -297,5 +539,12 @@ class SettingsWindowController(NSObject):
             self.config.get("explain_model"), self.config.get("vision_model"),
             self.config.get("hotkey_explain_text"),
             self.config.get("hotkey_explain_region"),
-            "detail=" + str(self.config.get("explain_detail")), flush=True,
+            "detail=" + str(self.config.get("explain_detail")),
+            "temp=" + str(self.config.get("temperature")),
+            "max_tokens=" + str(self.config.get("max_tokens")),
+            "followup=" + str(self.config.get("followup_max_turns")),
+            "prompt_text[:30]=" + repr(
+                str(self.config.get("system_prompt_text"))[:30]
+            ),
+            flush=True,
         )

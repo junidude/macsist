@@ -35,7 +35,14 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 - **Settings window** — server URL; explain/vision model comboboxes populated
   live from `/v1/models` (free text works when server is down); hotkey
   recorder (click → press combo, keyCode-based); detail level (간단/보통/자세히)
-  changing prompt suffix + max_tokens.
+  changing prompt suffix + max_tokens. **고급 설정 flap**: both system prompts
+  (default is translate-first — non-Korean input gets a '번역:' line before
+  the explanation), image user prompt, temperature, max_tokens, follow-up turn
+  cap, `chat_template_kwargs` as JSON — validated on Save (invalid input
+  blocks the whole save with a ⚠ message), "고급 기본값 복원" resets the
+  fields to shipped defaults. Stale-default migration: if an on-disk value
+  still equals a superseded old default the user never touched, the new
+  default wins (`config._SUPERSEDED_DEFAULTS`).
 - **Thinking models** — `delta.reasoning` handled; `chat_template_kwargs:
   {"enable_thinking": false}` sent by default *(config)*.
 - **Always-on** — both the LLM server and the app run as launchd LaunchAgents
@@ -97,7 +104,8 @@ seconds — fire hotkey paths programmatically), `HE_DEBUG_FAKE_TEXT` (bypass
 capture), `HE_DEBUG_REGION_RECT="x,y,w,h"` (bypass interactive overlay),
 `HE_DEBUG_KEEP_PANEL` (don't install dismiss monitors — note: also disables
 M6 click-to-focus, which lives in the local monitor), `HE_DEBUG_FRAME`,
-`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_WIN_ORIGIN="x,y"`,
+`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_OPEN_SETTINGS` (seconds — open the settings
+window), `HE_DEBUG_WIN_ORIGIN="x,y"`,
 `HE_DEBUG_FOLLOWUP_AFTER` (comma-separated seconds — submit a follow-up
 programmatically) + `HE_DEBUG_FOLLOWUP_TEXT` (its question),
 `HE_DEBUG_FOLLOWUP_KEYCYCLE` (seconds — focus the input, log key/first-responder
@@ -202,8 +210,9 @@ typing without activating our app; the source app keeps visual focus).
   "항상 위" floating toggle), list of past Q/A newest-first with search field;
   click a row → expand full text, buttons: copy, re-ask (re-runs with current
   model). Sidebar or tab switches to **Settings** — the existing settings
-  controls move here (server/provider, models, hotkeys, detail, prompts
-  **including system-prompt editing**, the M4 leftover).
+  controls move here (server/provider, models, hotkeys, detail, and the
+  advanced flap — system prompts/temperature/max_tokens etc., already
+  shipped in the settings window; M7 only relocates it).
 - The menu bar menu gains: History/Settings 열기, server status line (M5).
 
 ### 5.3 Glass UI (M8)

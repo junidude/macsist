@@ -65,6 +65,12 @@ class StatusItemController(NSObject):
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 15.0, self, "debugOpenMenu:", None, True
             )
+        open_settings = os.environ.get("HE_DEBUG_OPEN_SETTINGS")
+        if open_settings:
+            from Foundation import NSTimer
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                float(open_settings), self, "openSettings:", None, False
+            )
         return self
 
     def debugOpenMenu_(self, timer):
