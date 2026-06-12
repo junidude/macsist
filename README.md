@@ -32,6 +32,17 @@ capture, **Screen Recording**, then restart:
 For development, run the app in the foreground instead with `app/run.sh`.
 Full spec and architecture: [docs/SPEC.md](docs/SPEC.md).
 
+## Roadmap (v2 — designs locked in [docs/SPEC.md](docs/SPEC.md) §5–6)
+
+- **M5** server status in the menu bar + "model loading" awareness
+- **M6** follow-up questions typed directly into the result panel
+- **M7** persistent history window (searchable past Q/A) with embedded settings
+- **M8** Liquid-Glass UI redesign (translucent, rounded, animated)
+- **M9** external OpenAI-compatible API providers (for machines that can't host
+  a local LLM; keys in the macOS Keychain)
+- **M10** one-command onboarding installer + `macsist` CLI
+  (`status / logs / doctor / restart / update`)
+
 ---
 
 # Local LLM Server
@@ -149,12 +160,13 @@ fallback in the spec) is **not** needed.
 
 ## Notes / gotchas
 
-- **27B is a thinking model.** It emits a reasoning block first; the final answer
-  lands in `choices[].delta.content` only after thinking completes. With a small
-  `max_tokens` you may see empty `content` (all tokens spent reasoning) and the
-  text in a `reasoning` field instead. The v1 explain flow uses the **35B**, which
-  streams `content` directly, so the app's SPEC parser works as-is. Revisit
-  thinking control (e.g. `chat_template_kwargs`) when the 27B agent path is built.
+- **27B is a thinking model** (emits `delta.reasoning` before any `content`).
+  Handled: the app sends `chat_template_kwargs: {"enable_thinking": false}` by
+  default *(config)*, renders thinking progress ("생각 중… N자") when reasoning
+  deltas do arrive, and reports clearly if a stream ends content-less.
+- **27B is text-only** — it rejects `image_url` content
+  (`Only 'text' content type is supported`). Region capture therefore uses the
+  separate `vision_model` config (default: the 35B).
 - **HF auth:** logged in as `junidude14` (token cached in `~/.cache/huggingface`)
   for faster, rate-limit-free downloads.
 - **Secrets:** `tokens_and_keys/` is chmod 700 and git-ignored. Never commit keys.
