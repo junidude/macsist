@@ -355,6 +355,29 @@ interactive TUI (plain bash + read prompts; Korean) that walks through:
    for the user's bindings.
 Idempotent — safe to re-run; each step detects "already done".
 
+*(As built, M10)* Hardware tiering: `sysctl hw.memsize` → 128GB+ recommends the
+full 2-model stack; below that, the best single **multimodal** model whose
+min-RAM fits (Qwen3.6-35B-A3B 48GB+ → gemma-4-31b-it 40+ → gemma-4-26b-a4b-it
+32+ → gemma-4-12B-it-qat 16+ → gemma-4-E4B-it-qat 8+); <16GB recommends the
+API path. Every catalog id is verified against the HF API before being offered
+(404 → tier dropped with a warning), so guessed ids self-heal at runtime.
+Server models live in `models.env` next to the deployed `start_server.sh`
+(`MACSIST_SERVER_MODE=full|vlm-only|lm-only`, `MACSIST_VLM_MODEL`,
+`MACSIST_LM_MODEL`) — sourced by `start_server.sh`, exported to the proxy;
+`--supervise` now combines with the stack mode. `server.py` routes to the LM
+backend only when that backend is expected, and `/v1/models` reflects the
+running stack. Config/Keychain writes go through `cli/configure.py`
+(stdlib-only; reuses `app/config.py` + `app/keychain.py`; `set-api-provider`
+takes the key on **stdin**). TCC probing: `main.py` logs
+`TCC: accessibility=<bool> screen_recording=<bool>` at startup — the installer
+and `doctor` kickstart the app and read only log bytes written after the
+kickstart offset. App round-trip smoke: `HE_DEBUG_SKIP_AX_PROMPT=1
+HE_DEBUG_KEEP_PANEL=1 HE_DEBUG_FAKE_TEXT=… HE_DEBUG_EXPLAIN_AFTER=2`,
+foreground deployed-venv run, success = the `stream finished, panel text:`
+line; KEEP_PANEL is required — a user keystroke/click mid-install would
+otherwise dismiss the panel and cancel the stream (and never use a dismiss
+timer shorter than the stream: the local 27B needs ~30s for 512 tokens).
+
 ### 5.6 `macsist` CLI (M10b)
 A launcher command on PATH (installed by `install.sh` into
 `/usr/local/bin/macsist` or `~/.local/bin`): a small **bash/Python** dispatcher
@@ -369,6 +392,19 @@ macsist settings   # open the Settings/History window (via a distributed
 macsist doctor     # diagnose: TCC, launchd, server health, config validity
 macsist update     # git pull + redeploy both agents
 ```
+
+*(As built, M10)* `cli/macsist`, symlinked from `/usr/local/bin` (sudo) or
+`~/.local/bin` (fallback); resolves its own symlink to find the repo for
+`update`. `settings`/`history` post distributed notifications
+`com.macsist.showSettings` / `com.macsist.showHistory` (observer:
+`_RemoteCommandRelay` in `main.py`, logs `remote: …`), posted via the deployed
+app venv python (has PyObjC). `status`/`doctor` read config through
+`configure.py status --shell` (eval-able KEY=VALUE — no jq) and the last
+`TCC:` line in app.log; external providers are probed by `configure.py probe`
+(auth header stays inside python). `update` redeploys the server only when its
+plist exists (API-only installs have no server agent). Both deploy.sh scripts
+retry `launchctl bootstrap` up to 5× — bootstrap immediately after bootout
+intermittently fails with I/O error 5.
 
 ---
 
@@ -485,10 +521,31 @@ memory `verify-ui-without-screenshots`).
   로컬 서버 switch / model combos / authed 모델 새로고침) — staged in memory,
   committed on Save; typed keys go Keychain-only via a `_pending_key`
   staging slot stripped before `config.set`.
-- **M10 — Onboarding + CLI** (§5.5–5.6).
+- **M10 — Onboarding + CLI** (§5.5–5.6). **DONE (2026-06-12).**
   *AC:* on a machine state simulating "nothing installed", `install.sh` reaches
   a working explain in one session (both the local and the API path);
   `macsist status|logs|doctor|restart` work from any directory.
+  *AC verified (move-aside simulation: agents booted out, `…/Application
+  Support/Macsist` + both plists moved to `*.m10bak`, then restored):*
+  **API path** — bare state → scripted `install.sh` (외부 API → OpenAI,
+  existing Keychain account referenced by name only) → app round-trip streamed
+  a Korean answer via `api.openai.com` (`stream finished, panel text:`);
+  `doctor` all-✓ with the server section correctly skipped; key material in
+  config.json: 0 grep hits. **Local path** — bare state → scripted
+  `install.sh` (full stack recommended for 128GB) → conda env/HF token/models
+  detected as already-done, `models.env` written, server deployed, smoke ✓
+  (health ok → 27B chat probe → app round-trip streamed). **Idempotency** —
+  immediate rerun: every step `[건너뜀]`, `config.json` diff empty.
+  **CLI from /tmp** — `status`, `doctor` (rc 0), `logs server`, `restart app`
+  (fresh `TCC:` line), `settings`/`history` (`remote: showSettings` /
+  `remote: showHistory` in app.log), `update` (ff-only no-op + both
+  redeploys), via the `~/.local/bin` fallback symlink. **vlm-only
+  regression** — with a vlm-only `models.env`: `/health` counts only the vlm,
+  `/v1/models` lists one model, a request naming the 27B falls through to the
+  VLM backend and answers 200. Live setup restored afterwards; `doctor` all-✓
+  on the user's original config. Debugging notes that became invariants:
+  smoke needs `HE_DEBUG_KEEP_PANEL` (user input dismisses the panel →
+  cancels the stream) and no dismiss timer shorter than the stream.
 
 ---
 
@@ -549,6 +606,8 @@ macsist/
   docs/SPEC.md          this file
   README.md             user-facing: install, server ops, troubleshooting
   CLAUDE.md             agent instructions (lean)
-  install.sh            (M10) onboarding installer
-  cli/macsist           (M10) CLI dispatcher
+  install.sh            (M10) onboarding installer (Korean TUI, idempotent)
+  cli/macsist           (M10) CLI dispatcher (symlinked onto PATH)
+  cli/configure.py      (M10) config/Keychain helper (stdlib-only)
+  server/requirements.txt  (M10) conda env package pins
 ```

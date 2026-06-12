@@ -3,10 +3,13 @@ LLM proxy server for Macsist.
 Listens on :8000, routes /v1/chat/completions to the appropriate mlx backend.
 
 Model routing:
-  - Qwen3.6-35B-A3B-*  → mlx-vlm (port 8001) — multimodal, handles text + vision
-  - Qwen3.6-27B-*      → mlx-lm  (port 8002) — dense text model
+  - the configured MACSIST_LM_MODEL → mlx-lm  (port 8002) — dense text model
+  - everything else                → mlx-vlm (port 8001) — multimodal
 
-Any model not explicitly mapped falls through to the vlm backend (port 8001).
+Model ids come from MACSIST_VLM_MODEL / MACSIST_LM_MODEL (exported by
+start_server.sh from models.env); the defaults below match the historical
+hardcoded ids. Any model not explicitly mapped — including the LM model when
+the stack runs vlm-only — falls through to the vlm backend (port 8001).
 The proxy is transparent: it streams SSE verbatim from the backend.
 """
 
@@ -32,7 +35,12 @@ EXPECTED_BACKENDS = [
 ]
 HEALTH_PROBE_TIMEOUT = float(os.getenv("HE_HEALTH_PROBE_TIMEOUT", "1.0"))
 
-DENSE_MODELS = {"Qwen3.6-27B", "qwen3.6-27b"}
+VLM_MODEL_ID = os.getenv("MACSIST_VLM_MODEL", "mlx-community/Qwen3.6-35B-A3B-4bit")
+LM_MODEL_ID  = os.getenv("MACSIST_LM_MODEL",  "mlx-community/Qwen3.6-27B-4bit")
+
+# Legacy substrings kept so pre-M10 configs that name the 27B keep routing to
+# the dense backend even if MACSIST_LM_MODEL was set to something else.
+DENSE_MODELS = {"qwen3.6-27b"}
 
 
 def _normalize_sse_line(line: bytes) -> bytes:
@@ -83,9 +91,17 @@ def _model_loading_response(backend: str) -> JSONResponse:
 
 
 def _pick_backend(model_id: str) -> str:
-    for name in DENSE_MODELS:
-        if name.lower() in model_id.lower():
+    # Never route to a backend this stack doesn't run: a stale app config
+    # naming the LM model on a vlm-only stack must fall through to the VLM
+    # instead of 503-ing forever against a port that never binds.
+    if "lm" in EXPECTED_BACKENDS:
+        lm_basename = LM_MODEL_ID.rsplit("/", 1)[-1].lower()
+        wanted = model_id.lower()
+        if lm_basename and lm_basename in wanted:
             return LM_BACKEND
+        for name in DENSE_MODELS:
+            if name in wanted:
+                return LM_BACKEND
     return VLM_BACKEND
 
 
@@ -117,12 +133,14 @@ async def health():
 
 @app.get("/v1/models")
 async def models():
+    served = []
+    if "vlm" in EXPECTED_BACKENDS:
+        served.append(VLM_MODEL_ID)
+    if "lm" in EXPECTED_BACKENDS:
+        served.append(LM_MODEL_ID)
     return {
         "object": "list",
-        "data": [
-            {"id": "mlx-community/Qwen3.6-35B-A3B-4bit", "object": "model"},
-            {"id": "mlx-community/Qwen3.6-27B-4bit",     "object": "model"},
-        ],
+        "data": [{"id": mid, "object": "model"} for mid in served],
     }
 
 

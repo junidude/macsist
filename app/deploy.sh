@@ -56,7 +56,13 @@ EOF
 launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# bootstrap right after bootout intermittently fails with I/O error 5 while
+# launchd tears the old job down — retry briefly instead of dying (M10).
+for attempt in 1 2 3 4 5; do
+  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break
+  [ "$attempt" = 5 ] && { echo "bootstrap failed: $LABEL" >&2; exit 1; }
+  sleep 1
+done
 
 echo "Deployed app to: $DEST_DIR"
 echo "LaunchAgent (re)loaded: $LABEL"

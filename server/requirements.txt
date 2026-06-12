@@ -1,0 +1,8 @@
+# conda env `llm-server` (python 3.11) — installed by install.sh via
+#   pip install -r server/requirements.txt
+mlx-lm
+mlx-vlm
+fastapi
+uvicorn
+httpx
+huggingface_hub

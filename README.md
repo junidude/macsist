@@ -30,32 +30,56 @@ LLM (MLX). No cloud, no Electron.
   MLX-backed (`mlx-lm` / `mlx-vlm`) behind a FastAPI proxy. Apple Silicon,
   macOS 26.2+.
 
-## Install (two parts)
+## Install
 
 ```bash
-# 1. LLM server — one-time model download, then always-on via launchd
-server/download_models.sh
-server/deploy.sh
+./install.sh
+```
 
-# 2. Menu-bar app — always-on via launchd
-app/deploy.sh
+One interactive (Korean) session does everything: hardware check → model
+recommendation sized to your RAM (Qwen 3.6 / Gemma 4 multimodal tiers, or an
+external OpenAI-compatible API for small machines) → miniforge/conda env →
+model download (asks for an optional HF token) → server + app launchd agents →
+`macsist` CLI → guided TCC grants → smoke test (a real explain round-trip).
+Idempotent — re-run any time; finished steps are skipped.
+
+Manual path (what the installer automates), for development or debugging:
+
+```bash
+server/download_models.sh   # one-time model download
+server/deploy.sh            # server LaunchAgent
+app/deploy.sh               # app LaunchAgent
 ```
 
 On first launch grant **Accessibility** (prompted) and, on first region
-capture, **Screen Recording**, then restart:
-`launchctl kickstart -k "gui/$(id -u)/com.macsist.app"`.
+capture, **Screen Recording**, then `macsist restart app`.
 For development, run the app in the foreground instead with `app/run.sh`.
 Full spec and architecture: [docs/SPEC.md](docs/SPEC.md).
+
+## `macsist` CLI
+
+Installed by `install.sh` as a symlink (`/usr/local/bin/macsist` or
+`~/.local/bin/macsist`) pointing into the repo — works from any directory.
+
+| Command | Does |
+| --- | --- |
+| `macsist` | ensure both agents are running, then status summary |
+| `macsist start\|stop\|restart [app\|server]` | manage the launchd agents |
+| `macsist status` | agents, server health, provider/models, TCC state |
+| `macsist logs [app\|server] [-f]` | tail the right log files |
+| `macsist settings` / `history` | open the main window (distributed notification) |
+| `macsist doctor` | full ✓/✗ diagnosis: deploy, config, Keychain key, health, TCC, model cache |
+| `macsist update` | `git pull --ff-only` + redeploy both agents |
 
 ## Roadmap (v2 — designs locked in [docs/SPEC.md](docs/SPEC.md) §5–6)
 
 - **M5** ✅ server status in the menu bar + "model loading" awareness
 - **M6** ✅ follow-up questions typed directly into the result panel
 - **M7** ✅ persistent history window (searchable past Q/A) with embedded settings
-- **M8** Liquid-Glass UI redesign (translucent, rounded, animated)
-- **M9** external OpenAI-compatible API providers (for machines that can't host
-  a local LLM; keys in the macOS Keychain)
-- **M10** one-command onboarding installer + `macsist` CLI
+- **M8** ✅ Liquid-Glass UI redesign (translucent, rounded, animated)
+- **M9** ✅ external OpenAI-compatible API providers (for machines that can't
+  host a local LLM; keys in the macOS Keychain)
+- **M10** ✅ one-command onboarding installer + `macsist` CLI
   (`status / logs / doctor / restart / update`)
 
 ---
@@ -90,10 +114,18 @@ the `model` field in the request transparently routes to the right backend.
 | Path | Role |
 | --- | --- |
 | `server/server.py` | FastAPI proxy: health, `/v1/models`, `/v1/chat/completions` routing |
-| `server/start_server.sh` | Starts all 3 processes; `--supervise` mode for launchd |
-| `server/download_models.sh` | One-time model download |
+| `server/start_server.sh` | Starts the configured stack; `--supervise` mode for launchd |
+| `server/download_models.sh` | Model download (`download_models.sh [<hf-id> …]`); resumable/idempotent |
 | `server/deploy.sh` | Copies scripts to a non-TCC location + (re)installs the LaunchAgent |
+| `~/Library/Application Support/Macsist/server/models.env` | Which models/stack to run (written by `install.sh`) |
 | `~/Library/LaunchAgents/com.macsist.llm-server.plist` | Always-on at login |
+
+Server models are **not hardcoded** (M10): `models.env` next to the deployed
+`start_server.sh` sets `MACSIST_SERVER_MODE` (`full` = VLM+LM two-backend
+stack, `vlm-only` = one multimodal model) plus `MACSIST_VLM_MODEL` /
+`MACSIST_LM_MODEL`. No file → the historical defaults below. The proxy routes
+a request to the LM backend only when that backend is part of the running
+stack, so a stale model name in the app config degrades gracefully to the VLM.
 
 > **Why deploy.sh exists:** `~/Documents` is a TCC-protected folder that launchd
 > agents **cannot read** (`Operation not permitted`). `deploy.sh` copies the

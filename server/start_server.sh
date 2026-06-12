@@ -2,15 +2,24 @@
 # Start the three server processes for Macsist.
 #
 # Usage:
-#   ./start_server.sh                 # start all, return to shell (manual/dev)
-#   ./start_server.sh --supervise     # start all, then block (for launchd KeepAlive)
+#   ./start_server.sh                 # start the configured stack, return to shell
+#   ./start_server.sh --supervise     # same, then block (for launchd KeepAlive)
 #   ./start_server.sh --vlm-only      # only the vision/explain backend + proxy
 #   ./start_server.sh --lm-only       # only the dense backend + proxy
+#   (--supervise combines with --vlm-only/--lm-only; without a stack flag the
+#    mode comes from models.env, default "full")
+#
+# Models/mode are configured in models.env next to this script (written by
+# install.sh — M10):
+#   MACSIST_SERVER_MODE="full" | "vlm-only" | "lm-only"
+#   MACSIST_VLM_MODEL="mlx-community/..."   # multimodal backend (:8001)
+#   MACSIST_LM_MODEL="mlx-community/..."    # dense text backend (:8002)
+# Without models.env the historical defaults below apply unchanged.
 #
 # Ports:
 #   8000 — proxy (FastAPI, routes to 8001/8002)
-#   8001 — mlx-vlm  backend  (Qwen3.6-35B-A3B-4bit, multimodal, explain default)
-#   8002 — mlx-lm   backend  (Qwen3.6-27B-4bit, dense, agent backbone)
+#   8001 — mlx-vlm  backend  (MACSIST_VLM_MODEL — multimodal, explain default)
+#   8002 — mlx-lm   backend  (MACSIST_LM_MODEL — dense text, agent backbone)
 #
 # Logs: ~/Library/Logs/llm-server/{proxy,vlm,lm}.log
 #
@@ -28,8 +37,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$HOME/Library/Logs/llm-server"
 mkdir -p "$LOG_DIR"
 
-VLM_MODEL="mlx-community/Qwen3.6-35B-A3B-4bit"
-LM_MODEL="mlx-community/Qwen3.6-27B-4bit"
+# shellcheck disable=SC1091
+[[ -f "$SCRIPT_DIR/models.env" ]] && source "$SCRIPT_DIR/models.env"
+VLM_MODEL="${MACSIST_VLM_MODEL:-mlx-community/Qwen3.6-35B-A3B-4bit}"
+LM_MODEL="${MACSIST_LM_MODEL:-mlx-community/Qwen3.6-27B-4bit}"
 
 # server.py lives next to this script; uvicorn imports it as `server:app`.
 cd "$SCRIPT_DIR"
@@ -39,7 +50,19 @@ cd "$SCRIPT_DIR"
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate "$ENV_NAME"
 
-MODE="${1:-}"
+# --supervise is orthogonal to the stack mode: launchd always passes
+# --supervise and the stack mode comes from models.env (CLI flag wins for
+# manual/dev runs).
+SUPERVISE=0
+STACK_MODE="${MACSIST_SERVER_MODE:-full}"
+for arg in "$@"; do
+    case "$arg" in
+        --supervise) SUPERVISE=1 ;;
+        --vlm-only)  STACK_MODE="vlm-only" ;;
+        --lm-only)   STACK_MODE="lm-only" ;;
+        *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
 
 stop_existing() {
     # SIGTERM, then wait up to ~10s for each port to free, then SIGKILL.
@@ -65,7 +88,7 @@ stop_existing
 
 PIDS=()
 
-if [[ "$MODE" != "--lm-only" ]]; then
+if [[ "$STACK_MODE" != "lm-only" ]]; then
     echo "Starting mlx-vlm backend on :8001 (model: $VLM_MODEL) ..."
     python3 -m mlx_vlm.server --model "$VLM_MODEL" --port 8001 --host 127.0.0.1 \
         >> "$LOG_DIR/vlm.log" 2>&1 &
@@ -73,7 +96,7 @@ if [[ "$MODE" != "--lm-only" ]]; then
     echo "  vlm PID=$! log=$LOG_DIR/vlm.log"
 fi
 
-if [[ "$MODE" != "--vlm-only" ]]; then
+if [[ "$STACK_MODE" != "vlm-only" ]]; then
     echo "Starting mlx-lm backend on :8002 (model: $LM_MODEL) ..."
     python3 -m mlx_lm.server --model "$LM_MODEL" --port 8002 --host 127.0.0.1 \
         >> "$LOG_DIR/lm.log" 2>&1 &
@@ -86,11 +109,15 @@ sleep 5
 
 # Tell the proxy which backends to count in /health (vlm-only/lm-only stacks
 # must not report "loading" forever for the backend they never start).
-case "$MODE" in
-    --vlm-only) export HE_EXPECTED_BACKENDS="vlm" ;;
-    --lm-only)  export HE_EXPECTED_BACKENDS="lm" ;;
-    *)          export HE_EXPECTED_BACKENDS="vlm,lm" ;;
+case "$STACK_MODE" in
+    vlm-only) export HE_EXPECTED_BACKENDS="vlm" ;;
+    lm-only)  export HE_EXPECTED_BACKENDS="lm" ;;
+    *)        export HE_EXPECTED_BACKENDS="vlm,lm" ;;
 esac
+
+# The proxy reports/routes the configured models (server.py defaults match
+# the historical hardcoded ids).
+export MACSIST_VLM_MODEL="$VLM_MODEL" MACSIST_LM_MODEL="$LM_MODEL"
 
 echo "Starting proxy on :8000 (expected backends: $HE_EXPECTED_BACKENDS) ..."
 uvicorn server:app --host 127.0.0.1 --port 8000 --log-level info \
@@ -101,7 +128,7 @@ echo "  proxy PID=$! log=$LOG_DIR/proxy.log"
 echo ""
 echo "All servers started. Macsist endpoint: http://127.0.0.1:8000"
 
-if [[ "$MODE" == "--supervise" ]]; then
+if [[ "$SUPERVISE" == 1 ]]; then
     # Block as the launchd job's main process. If ANY child dies, exit non-zero
     # so launchd (KeepAlive=true) restarts the whole stack cleanly.
     # Poll-based so it works on macOS's stock bash 3.2 (no `wait -n`).

@@ -7,6 +7,8 @@ import os
 import pathlib
 import sys
 
+import objc
+
 from AppKit import (
     NSAppearance,
     NSAppearanceNameAqua,
@@ -18,7 +20,13 @@ from AppKit import (
     NSWorkspace,
 )
 from ApplicationServices import AXIsProcessTrusted, AXIsProcessTrustedWithOptions
-from Foundation import NSObject, NSTimer, NSURL
+from Foundation import (
+    NSDistributedNotificationCenter,
+    NSObject,
+    NSTimer,
+    NSURL,
+)
+from Quartz import CGPreflightScreenCaptureAccess
 from PyObjCTools import AppHelper
 
 from explain_controller import URL_PANE_ACCESSIBILITY
@@ -36,6 +44,29 @@ _explain = None
 _health = None
 _ax_waiter = None
 _ui_auditor = None
+_remote_relay = None
+
+
+class _RemoteCommandRelay(NSObject):
+    """`macsist settings|history` (M10) posts distributed notifications; the
+    observer is registered on the main thread/runloop, so delivery is
+    main-thread — safe to drive AppKit directly. The `remote:` lines are the
+    greppable verification hook (app.log)."""
+
+    def initWithMainWindow_(self, main_window):
+        self = objc.super(_RemoteCommandRelay, self).init()
+        if self is None:
+            return None
+        self._main_window = main_window
+        return self
+
+    def remoteShowSettings_(self, note):
+        print("remote: showSettings", flush=True)
+        self._main_window.showSettings()
+
+    def remoteShowHistory_(self, note):
+        print("remote: showHistory", flush=True)
+        self._main_window.showHistory()
 
 
 class _UIAuditor(NSObject):
@@ -155,9 +186,18 @@ class _AXGrantWaiter(NSObject):
 
 
 def main():
-    global _controller, _explain, _health, _ax_waiter, _ui_auditor
+    global _controller, _explain, _health, _ax_waiter, _ui_auditor, _remote_relay
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    # Machine-readable TCC probe for install.sh / `macsist doctor` (M10):
+    # shell-side AXIsProcessTrusted checks attribute to the terminal, not this
+    # binary, so the app reports its own grant state on every (re)start.
+    # CGPreflightScreenCaptureAccess never prompts.
+    print(
+        f"TCC: accessibility={bool(AXIsProcessTrusted())} "
+        f"screen_recording={bool(CGPreflightScreenCaptureAccess())}",
+        flush=True,
+    )
     # Dock icon (user asset) — shown while the History window has the app in
     # Regular policy; a bundle-less python process has no Info.plist icon.
     icns = pathlib.Path(__file__).parent / "assets" / "macsist.icns"
@@ -175,7 +215,11 @@ def main():
             else NSAppearanceNameAqua
         ))
         print(f"HE_DEBUG_FORCE_APPEARANCE={forced}", flush=True)
-    if not AXIsProcessTrusted():
+    # HE_DEBUG_SKIP_AX_PROMPT: the installer's foreground smoke run uses
+    # HE_DEBUG_FAKE_TEXT (no capture, no TCC) — don't pop the system
+    # Accessibility dialog in the terminal's name during it.
+    if (not AXIsProcessTrusted()
+            and not os.environ.get("HE_DEBUG_SKIP_AX_PROMPT")):
         # Without Accessibility the hotkey tap receives nothing, so the user
         # could never reach the in-panel permission message — prompt up front
         # (registers this python in System Settings), open the exact pane,
@@ -212,6 +256,15 @@ def main():
     main_window.on_reask = _explain.resubmit_text
     main_window.on_reask_image = _explain.resubmit_image
     _explain.on_open_history = main_window.toggleHistory
+    # M10: `macsist settings|history` IPC (distributed notifications).
+    _remote_relay = _RemoteCommandRelay.alloc().initWithMainWindow_(main_window)
+    dist_center = NSDistributedNotificationCenter.defaultCenter()
+    dist_center.addObserver_selector_name_object_(
+        _remote_relay, "remoteShowSettings:", "com.macsist.showSettings", None
+    )
+    dist_center.addObserver_selector_name_object_(
+        _remote_relay, "remoteShowHistory:", "com.macsist.showHistory", None
+    )
     audit = os.environ.get("HE_DEBUG_UI_AUDIT")
     if audit:
         _ui_auditor = _UIAuditor.alloc().init()
