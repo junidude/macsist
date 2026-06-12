@@ -26,13 +26,23 @@ from region_capture import capture_region, to_data_url
 from text_capture import capture_selected_text
 
 MSG_NO_ACCESSIBILITY = (
-    "손쉬운 사용 권한이 필요합니다 — 시스템 설정 > 개인정보 보호 및 보안 > "
-    "손쉬운 사용에서 이 앱(개발 중엔 터미널)을 허용하세요."
+    "손쉬운 사용 권한이 필요합니다 — 방금 연 시스템 설정 창에서 이 앱"
+    "(개발 중엔 터미널)을 허용하세요."
 )
 MSG_NO_SELECTION = "선택된 텍스트가 없습니다."
 MSG_NO_SCREEN_RECORDING = (
-    "화면 기록 권한이 필요합니다 — 시스템 설정 > 개인정보 보호 및 보안 > "
-    "화면 기록에서 허용한 뒤 앱을 재실행하세요."
+    "화면 기록 권한이 필요합니다 — 방금 연 시스템 설정 창에서 허용한 뒤 "
+    "앱을 재실행하세요."
+)
+
+# System Settings deep links (M5 permission onboarding)
+URL_PANE_ACCESSIBILITY = (
+    "x-apple.systempreferences:com.apple.preference.security"
+    "?Privacy_Accessibility"
+)
+URL_PANE_SCREEN_RECORDING = (
+    "x-apple.systempreferences:com.apple.preference.security"
+    "?Privacy_ScreenCapture"
 )
 MSG_VISION_HINT = (
     " (이미지 미지원 모델일 수 있습니다 — Settings에서 Vision model을 확인하세요.)"
@@ -40,15 +50,17 @@ MSG_VISION_HINT = (
 
 
 class ExplainController:
-    def __init__(self, config, panel):
+    def __init__(self, config, panel, health_monitor=None):
         self.config = config
         self.panel = panel
+        self.health_monitor = health_monitor
         self.client = LLMClient(config)
         self._lock = threading.Lock()
         self._gen = 0
         self._handle = None
         self._capture_proc = None  # pending `screencapture -i` (region mode)
         panel.on_dismiss = self._onPanelDismissed
+        self._opened_panes = set()  # System Settings panes opened this run
         self.hotkeys = HotkeyManager(self._bindings())
 
     def _bindings(self):
@@ -129,6 +141,7 @@ class ExplainController:
             text = fake
         else:
             if not AXIsProcessTrusted():
+                self._openSettingsPane(URL_PANE_ACCESSIBILITY)
                 self._onMain(gen, self.panel.showMessageAt_text_, cursor_tl,
                              MSG_NO_ACCESSIBILITY)
                 return
@@ -152,6 +165,7 @@ class ExplainController:
         if not CGPreflightScreenCaptureAccess():
             # registers the app in System Settings; prompts at most once
             CGRequestScreenCaptureAccess()
+            self._openSettingsPane(URL_PANE_SCREEN_RECORDING)
             loc = CGEventGetLocation(CGEventCreate(None))
             self._onMain(gen, self.panel.showMessageAt_text_, (loc.x, loc.y),
                          MSG_NO_SCREEN_RECORDING)
@@ -189,6 +203,24 @@ class ExplainController:
             error_suffix=MSG_VISION_HINT,
         )
 
+    def _openSettingsPane(self, url):
+        """Open the System Settings privacy pane the user needs — once per
+        run per pane, so repeated hotkey presses don't keep yanking System
+        Settings to the front. Worker thread → marshal to main (AppKit);
+        deliberately NOT generation-checked: a preempting press must not
+        suppress the pane."""
+        if url in self._opened_panes:
+            return
+        self._opened_panes.add(url)
+
+        def open_pane():
+            from AppKit import NSWorkspace
+            from Foundation import NSURL
+            print(f"opening System Settings pane: {url}", flush=True)
+            NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(url))
+
+        AppHelper.callAfter(open_pane)
+
     def _setCaptureProc(self, proc):
         with self._lock:
             self._capture_proc = proc
@@ -221,6 +253,9 @@ class ExplainController:
         except LLMError as err:
             # str(err) is the whole user-facing story — no tracebacks in the UI
             self._onMain(gen, self.panel.showErrorText_, str(err) + error_suffix)
+            if self.health_monitor is not None:
+                # update the menu bar now, not a poll interval later
+                self.health_monitor.poke()
             return
         if handle.cancelled:
             return

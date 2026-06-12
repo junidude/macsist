@@ -34,7 +34,7 @@ Full spec and architecture: [docs/SPEC.md](docs/SPEC.md).
 
 ## Roadmap (v2 — designs locked in [docs/SPEC.md](docs/SPEC.md) §5–6)
 
-- **M5** server status in the menu bar + "model loading" awareness
+- **M5** ✅ server status in the menu bar + "model loading" awareness
 - **M6** follow-up questions typed directly into the result panel
 - **M7** persistent history window (searchable past Q/A) with embedded settings
 - **M8** Liquid-Glass UI redesign (translucent, rounded, animated)
@@ -145,6 +145,8 @@ tail -f ~/Library/Logs/llm-server/launchd.log # supervisor / launchd
 ## Smoke tests
 
 ```bash
+# per-backend readiness: {"status":"ok"|"loading","backends":{"vlm":…,"lm":…}}
+# (the menu-bar app polls this; "loading" while a backend loads its model)
 curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/v1/models
 

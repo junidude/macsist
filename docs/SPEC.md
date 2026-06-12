@@ -41,6 +41,18 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 - **Always-on** — both the LLM server and the app run as launchd LaunchAgents
   (`com.hotkeyexplain.llm-server`, `com.hotkeyexplain.app`), auto-start at
   login, auto-restart on crash. `app/deploy.sh` / `server/deploy.sh` redeploy.
+- **Server status (M5)** — proxy `/health` probes both backends
+  (`{"status":"ok"|"loading","backends":{"vlm":…,"lm":…}}`; expected set via
+  `HE_EXPECTED_BACKENDS`, set by `start_server.sh` per mode). Menu bar shows a
+  3-state icon (`text.bubble` / `ellipsis.bubble` / `exclamationmark.bubble`)
+  + a disabled "서버: …" status line, fed by `ServerHealthMonitor` (daemon
+  thread polling every `health_poll_interval`; `poke()` re-polls right after a
+  request error). Proxy answers `503 {"error":{"code":"model_loading"}}` when
+  the routed backend isn't accepting connections → panel says "모델 로딩 중",
+  vs ConnectError → "서버 다운". Permission onboarding: missing-permission
+  errors auto-open the exact System Settings pane (once per run per pane), and
+  at startup without Accessibility the app polls the grant every 2 s and
+  exec-relaunches itself once granted.
 
 ### File map (`app/`)
 | File | Role |
@@ -50,7 +62,8 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `hotkeys.py` | pynput listener; **vk-based matching** (`_VkHotKey`), `format_binding`, pause/rebind, TIS main-thread patch |
 | `text_capture.py` | AX read → synthetic-⌘C fallback (capture lock, restore-only-if-changed, Maccy modifier recipe) |
 | `region_capture.py` | `screencapture -i` subprocess, PNG IHDR dims, `sips -Z` downscale, data-URL |
-| `llm_client.py` | httpx SSE client; `StreamHandle.cancel()` (raw socket shutdown); `on_reasoning`; per-call `model`/`max_tokens` override |
+| `llm_client.py` | httpx SSE client; `StreamHandle.cancel()` (raw socket shutdown); `on_reasoning`; per-call `model`/`max_tokens` override; 503 `model_loading` → "모델 로딩 중" |
+| `health.py` | `ServerHealthMonitor` — `/health` polling thread, ok/loading/down, `poke()` |
 | `result_panel.py` | never-key floating panel (`canBecomeKeyWindow → False`), NSEvent monitors for dismiss, streaming text view |
 | `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption |
 | `settings_window.py` | settings UI (combos / recorders / detail segments) |
@@ -65,7 +78,8 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 (default `<cmd>+<shift>+r`), `max_tokens`, `temperature`,
 `chat_template_kwargs`, `request_connect_timeout`, `request_read_timeout`,
 `capture_copy_timeout`, `capture_modifier_release_timeout`, `capture_max_chars`,
-`region_max_dim`, `panel_width`, `panel_height`, `panel_cursor_offset`.
+`region_max_dim`, `panel_width`, `panel_height`, `panel_cursor_offset`,
+`health_poll_interval`, `health_poll_timeout`.
 
 ### Debug hooks (env vars, kept for agent-driven verification)
 `HE_DEBUG_EXPLAIN_AFTER` / `HE_DEBUG_EXPLAIN_REGION_AFTER` (comma-separated
@@ -244,12 +258,16 @@ memory `verify-ui-without-screenshots`).
 
 - **M0–M4 — DONE** (scaffold, client, text explain, region explain,
   settings/model picker/hotkey recorder/detail levels).
-- **M5 — Robust status.** Proxy `/health` reports per-backend readiness; menu
-  bar shows server state (ok / loading / down); panel messages distinguish
+- **M5 — Robust status. DONE.** Proxy `/health` reports per-backend readiness;
+  menu bar shows server state (ok / loading / down); panel messages distinguish
   "서버 다운" from "모델 로딩 중". Permission onboarding polish (deep links,
-  re-check on focus).
-  *AC:* kill the server → menu bar flips within 30 s and a hotkey press says
-  서버 다운; restart it → "로딩 중" during model load, then ok.
+  poll-and-relaunch on grant — Accessory apps get no focus events, so the
+  "re-check on focus" became a 2 s poll).
+  *AC verified live (2026-06-12):* kill → app saw `down` ≤10 s, hotkey panel
+  says "서버 다운 —…"; restart → `/health` reports `loading` during model load
+  (warm-cache window is ~3 s, so the in-app `loading` flip was verified at the
+  mapping level), then `ok`; chat during load gets a clean
+  `503 model_loading` → "모델 로딩 중입니다".
 - **M6 — Follow-up questions** (§5.1).
   *AC:* explain → type a follow-up → contextual answer streams in the same
   panel; source app keeps working; Esc/Esc dismisses; new hotkey = new session.

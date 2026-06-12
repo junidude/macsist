@@ -60,6 +60,8 @@ DEFAULTS = {
     "chat_template_kwargs": {"enable_thinking": False},
     "request_connect_timeout": 5.0,
     "request_read_timeout": 120.0,
+    "health_poll_interval": 10.0,
+    "health_poll_timeout": 2.0,
     "region_max_dim": 1600,
     "capture_copy_timeout": 0.6,
     "capture_modifier_release_timeout": 0.3,

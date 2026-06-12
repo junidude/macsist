@@ -104,16 +104,13 @@ class LLMClient:
                     handle._attach(response)
                     if response.status_code >= 400:
                         response.read()
-                        raise LLMError(
-                            f"LLM 서버 오류 (HTTP {response.status_code}) — "
-                            "모델 id와 서버 로그를 확인하세요."
-                        )
+                        raise self._http_error(response)
                     yield from self._iter_sse(response, handle, on_reasoning)
         except LLMError:
             raise
         except httpx.ConnectError:
             raise LLMError(
-                f"LLM 서버에 연결할 수 없습니다 ({base_url}) — "
+                f"서버 다운 — LLM 서버에 연결할 수 없습니다 ({base_url}). "
                 "서버 실행 여부를 확인하세요."
             ) from None
         except httpx.TimeoutException:
@@ -130,6 +127,22 @@ class LLMClient:
             if handle.cancelled:
                 return
             raise
+
+    def _http_error(self, response):
+        """Map an HTTP error response to a user-facing LLMError. The proxy
+        answers 503 {"error": {"code": "model_loading"}} while a backend is
+        still loading its model (M5) — that gets its own message so the user
+        knows to just wait instead of debugging."""
+        try:
+            code = response.json().get("error", {}).get("code")
+        except ValueError:
+            code = None
+        if response.status_code == 503 and code == "model_loading":
+            return LLMError("모델 로딩 중입니다 — 잠시 후 다시 시도하세요.")
+        return LLMError(
+            f"LLM 서버 오류 (HTTP {response.status_code}) — "
+            "모델 id와 서버 로그를 확인하세요."
+        )
 
     def _iter_sse(self, response, handle, on_reasoning=None):
         for line in response.iter_lines():

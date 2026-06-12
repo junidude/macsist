@@ -9,8 +9,9 @@ Native macOS **menu-bar app** ("macsist / HotkeyExplain"). Global hotkey →
 captures **selected text** or a **screen region** → streams a **concise Korean
 explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default; external OpenAI-compatible providers planned in M9) into a floating
-panel near the cursor. **v1 (M0–M4) is shipped and running**; v2 work =
-M5–M10 (status UX, follow-up questions, history window, glass UI, providers,
+panel near the cursor. **M0–M5 are shipped and running** (M5: menu-bar server
+status, 서버 다운/모델 로딩 중 distinction, permission deep links); remaining
+v2 work = M6–M10 (follow-up questions, history window, glass UI, providers,
 onboarding installer + `macsist` CLI) — designs in `docs/SPEC.md` §5–6.
 
 ## Stack (locked)

@@ -22,6 +22,16 @@ app = FastAPI()
 VLM_BACKEND = os.getenv("VLM_BACKEND", "http://127.0.0.1:8001")
 LM_BACKEND  = os.getenv("LM_BACKEND",  "http://127.0.0.1:8002")
 
+# Which backends this stack is supposed to run (start_server.sh sets it per
+# mode: --vlm-only → "vlm", --lm-only → "lm"). /health only counts expected
+# backends toward the overall status, so a vlm-only stack isn't forever
+# reported as "loading" because :8002 never comes up.
+EXPECTED_BACKENDS = [
+    b.strip() for b in os.getenv("HE_EXPECTED_BACKENDS", "vlm,lm").split(",")
+    if b.strip()
+]
+HEALTH_PROBE_TIMEOUT = float(os.getenv("HE_HEALTH_PROBE_TIMEOUT", "1.0"))
+
 DENSE_MODELS = {"Qwen3.6-27B", "qwen3.6-27b"}
 
 
@@ -59,6 +69,19 @@ def _normalize_sse_line(line: bytes) -> bytes:
         return line  # leave anything unexpected untouched
 
 
+def _model_loading_response(backend: str) -> JSONResponse:
+    """503 for "the routed backend isn't accepting connections yet". While
+    this proxy is alive, that means the backend is still loading its model
+    (the supervisor kills the whole stack if a backend process dies)."""
+    return JSONResponse(
+        status_code=503,
+        content={"error": {
+            "code": "model_loading",
+            "message": f"backend not ready (loading model): {backend}",
+        }},
+    )
+
+
 def _pick_backend(model_id: str) -> str:
     for name in DENSE_MODELS:
         if name.lower() in model_id.lower():
@@ -66,9 +89,30 @@ def _pick_backend(model_id: str) -> str:
     return VLM_BACKEND
 
 
+async def _probe_backend(client: httpx.AsyncClient, base: str) -> str:
+    """One backend's readiness. Both mlx backends bind their port only when
+    they can serve (mlx-vlm pre-loads the model before uvicorn accepts;
+    mlx-lm binds immediately and lazy-loads), and the supervisor tears down
+    the whole stack when any backend process dies — so while this proxy is
+    answering, an unreachable backend means "still starting / loading"."""
+    try:
+        await client.get(f"{base}/health")
+        return "ok"
+    except httpx.HTTPError:
+        return "loading"
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    async with httpx.AsyncClient(timeout=HEALTH_PROBE_TIMEOUT) as client:
+        vlm, lm = await asyncio.gather(
+            _probe_backend(client, VLM_BACKEND),
+            _probe_backend(client, LM_BACKEND),
+        )
+    backends = {"vlm": vlm, "lm": lm}
+    ready = all(backends[name] == "ok" for name in EXPECTED_BACKENDS
+                if name in backends)
+    return {"status": "ok" if ready else "loading", "backends": backends}
 
 
 @app.get("/v1/models")
@@ -97,29 +141,53 @@ async def chat_completions(request: Request):
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in ("host", "content-length")}
 
-    async def generate():
-        # The mlx-vlm backend emits deltas with every OpenAI field present even
-        # when null ("reasoning":null,"tool_calls":null,...). Some SSE clients
-        # (e.g. Open WebUI) fail to render `content` when these null fields are
-        # present. Normalize each chunk to a clean minimal delta. We buffer by
-        # line so a chunk split mid-event is handled correctly.
-        buf = b""
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream("POST", f"{backend}/v1/chat/completions",
-                                     content=body, headers=headers) as resp:
+    if stream:
+        # Connect to the backend BEFORE returning the StreamingResponse: a
+        # ConnectError inside the generator would surface after the 200 status
+        # line is already on the wire, breaking the client mid-stream instead
+        # of giving it a clean "model loading" 503.
+        client = httpx.AsyncClient(timeout=300)
+        try:
+            req = client.build_request(
+                "POST", f"{backend}/v1/chat/completions",
+                content=body, headers=headers,
+            )
+            resp = await client.send(req, stream=True)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            await client.aclose()
+            return _model_loading_response(backend)
+
+        async def generate():
+            # The mlx-vlm backend emits deltas with every OpenAI field present
+            # even when null ("reasoning":null,"tool_calls":null,...). Some SSE
+            # clients (e.g. Open WebUI) fail to render `content` when these
+            # null fields are present. Normalize each chunk to a clean minimal
+            # delta. We buffer by line so a chunk split mid-event is handled
+            # correctly.
+            buf = b""
+            try:
                 async for chunk in resp.aiter_bytes():
                     buf += chunk
                     while b"\n" in buf:
                         line, buf = buf.split(b"\n", 1)
                         yield _normalize_sse_line(line) + b"\n"
-        if buf:
-            yield _normalize_sse_line(buf)
+                if buf:
+                    yield _normalize_sse_line(buf)
+            finally:
+                await resp.aclose()
+                await client.aclose()
 
-    if stream:
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        return StreamingResponse(
+            generate(),
+            status_code=resp.status_code,
+            media_type="text/event-stream",
+        )
 
     # Non-streaming: collect full response
-    async with httpx.AsyncClient(timeout=300) as client:
-        resp = await client.post(f"{backend}/v1/chat/completions",
-                                 content=body, headers=headers)
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{backend}/v1/chat/completions",
+                                     content=body, headers=headers)
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+        return _model_loading_response(backend)
     return JSONResponse(status_code=resp.status_code, content=resp.json())

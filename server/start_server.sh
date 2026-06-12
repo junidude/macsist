@@ -84,7 +84,15 @@ fi
 echo "Waiting for backends to load models (~60s first run, ~10s after cache)..."
 sleep 5
 
-echo "Starting proxy on :8000 ..."
+# Tell the proxy which backends to count in /health (vlm-only/lm-only stacks
+# must not report "loading" forever for the backend they never start).
+case "$MODE" in
+    --vlm-only) export HE_EXPECTED_BACKENDS="vlm" ;;
+    --lm-only)  export HE_EXPECTED_BACKENDS="lm" ;;
+    *)          export HE_EXPECTED_BACKENDS="vlm,lm" ;;
+esac
+
+echo "Starting proxy on :8000 (expected backends: $HE_EXPECTED_BACKENDS) ..."
 uvicorn server:app --host 127.0.0.1 --port 8000 --log-level info \
     >> "$LOG_DIR/proxy.log" 2>&1 &
 PIDS+=($!)
