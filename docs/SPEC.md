@@ -638,7 +638,13 @@ memory `verify-ui-without-screenshots`).
    context is snapshotted once on the main thread and patched in
    (`_warm_keyboard_layout_cache`). **Never create/start a new pynput listener
    after startup** — `HotkeyManager.rebind()` swaps matchers on the live
-   listener instead.
+   listener instead. Second leg (M11.1): pynput converts `NSSystemDefined`
+   CGEvents to NSEvent on the LISTENER thread for media-key detection; the
+   caps-lock / **한-A toggle** makes that conversion run
+   `TSMAdjustCapsLockPressAndHold` → TIS off-main → the app dies with SIGTRAP
+   on a single 한/A press. Fixed by stripping `CGEventMaskBit(NSSystemDefined)`
+   from the listener's tap mask in `HotkeyManager.__init__` (media keys
+   unused) — keep that mask override if pynput is ever upgraded.
 3. **Clipboard hard rule:** snapshot ALL pasteboard items (data copied before
    ⌘C), restore **only if changeCount actually changed**, serialize captures
    with a lock (concurrent captures clobber the user's clipboard).

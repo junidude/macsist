@@ -150,6 +150,19 @@ class HotkeyManager:
         self._listener = keyboard.Listener(
             on_press=self._on_press, on_release=self._on_release
         )
+        # macOS 26 crash fix (M11.1): pynput converts NSSystemDefined CGEvents
+        # to NSEvent on the LISTENER thread to detect media keys; for the
+        # caps-lock / 한-A toggle that conversion runs TSM's caps-lock
+        # press-and-hold handling (TSMAdjustCapsLockPressAndHold →
+        # TISCreateInputSource…), which is main-thread-only on macOS 26 →
+        # dispatch_assert_queue SIGTRAP kills the app. We never use media
+        # keys, so drop NSSystemDefined from this instance's tap mask — those
+        # events then never reach pynput's NSEvent conversion at all.
+        from pynput.keyboard._darwin import NSSystemDefined
+        from Quartz import CGEventMaskBit
+        self._listener._EVENTS = (
+            type(self._listener)._EVENTS & ~CGEventMaskBit(NSSystemDefined)
+        )
 
     def _on_press(self, key):
         if self._paused:

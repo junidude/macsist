@@ -41,6 +41,8 @@ switching — as-built notes in `docs/SPEC.md` §5.5–5.7).
 - Key matching/recording by **virtual keycode only** (Korean layout: 'e'→'ㄷ').
 - **Never start a new pynput listener after startup** (TIS APIs are
   main-thread-only on macOS 26 → SIGTRAP); use `HotkeyManager.rebind()`.
+  Same root cause: keep `NSSystemDefined` stripped from the tap mask
+  (M11.1 — 한/A·caps-lock NSEvent conversion SIGTRAPs the listener thread).
 - Pasteboard: snapshot all items → ⌘C → poll changeCount → restore **only if
   changed**; captures serialized by lock. Never leave the clipboard clobbered.
 - AX `kAXSelectedTextAttribute` first; fall back to synthetic ⌘C.
