@@ -301,10 +301,12 @@ memory `verify-ui-without-screenshots`).
   resets to a fresh session at default panel size; key cycle — focus → panel
   key (field editor first responder), unfocus → key returns to source app
   (orderOut+orderFrontRegardless handback), panel stays visible. Live human
-  input during verification confirmed click-to-focus + typed Return submit.
-  *Remaining human spot-check:* Esc/Esc two-stage dismiss and IME-composition
-  Esc (Esc with marked text cancels the 조합, not the field).
-- **M7 — History + main window** (§5.2, includes system-prompt editing UI).
+  input confirmed (2026-06-12): click-to-focus, typed Korean + Return submit,
+  source app keeps working during the follow-up, Esc/Esc two-stage dismiss,
+  IME-composition Esc (cancels the 조합, not the field). **Fully verified.**
+- **M7 — History + main window** (§5.2). System-prompt/advanced editing already
+  ships in the settings window (고급 설정 flap) — M7 relocates the existing
+  settings controls into this window's Settings tab, no new editing UI.
   *AC:* past explains searchable in the window; settings edits there apply
   without restart; history survives app restart; disable toggle works.
 - **M8 — Glass UI** (§5.3).
