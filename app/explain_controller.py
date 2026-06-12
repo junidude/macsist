@@ -49,6 +49,27 @@ MSG_VISION_HINT = (
 )
 
 
+def _last_user_image(messages):
+    """PNG bytes of the last user message's image part, or None. Used to save
+    the region capture alongside its history record (M7.1) — the base64 stays
+    out of the JSONL; the store writes the bytes to history_images/."""
+    import base64
+    prefix = "data:image/png;base64,"
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return None
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                url = part.get("image_url", {}).get("url", "")
+                if url.startswith(prefix):
+                    return base64.b64decode(url[len(prefix):])
+        return None
+    return None
+
+
 def _last_user_text(messages):
     """Text of the last user message, for the history record (M7). Multimodal
     content keeps only its text parts — region messages embed the screenshot
@@ -84,6 +105,7 @@ class ExplainController:
         self._session = None
         panel.on_dismiss = self._onPanelDismissed
         panel.on_followup = self.submitFollowUp
+        self.on_open_history = None  # set by main.py: MainWindow.toggleHistory
         self._opened_panes = set()  # System Settings panes opened this run
         self.hotkeys = HotkeyManager(self._bindings())
 
@@ -91,7 +113,13 @@ class ExplainController:
         return {
             str(self.config.get("hotkey_explain_text")): self.explainTextHotkey,
             str(self.config.get("hotkey_explain_region")): self.explainRegionHotkey,
+            str(self.config.get("hotkey_open_history")): self._openHistoryHotkey,
         }
+
+    def _openHistoryHotkey(self):
+        # pynput listener thread → the window toggle is pure AppKit
+        if self.on_open_history is not None:
+            AppHelper.callAfter(self.on_open_history)
 
     def start(self):
         self.hotkeys.start()
@@ -261,13 +289,20 @@ class ExplainController:
             return  # Esc / preempted / capture-to-clipboard — silent no-op
         # selection just ended; the mouse sits at its end point
         loc = CGEventGetLocation(CGEventCreate(None))
-        self._onMain(gen, self.panel.beginSessionAt_, (loc.x, loc.y))
+        self._runImage(
+            gen, handle, (loc.x, loc.y),
+            str(self.config.get("user_prompt_image")), png,
+        )
+
+    def _runImage(self, gen, handle, cursor_tl, user_text, png):
+        """Vision request tail shared by region capture and history re-ask."""
+        self._onMain(gen, self.panel.beginSessionAt_, cursor_tl)
         suffix, max_tokens, detail = self._detail()
         messages = [
             {"role": "system",
              "content": self.config.get("system_prompt_image") + suffix},
             {"role": "user", "content": [
-                {"type": "text", "text": self.config.get("user_prompt_image")},
+                {"type": "text", "text": user_text},
                 {"type": "image_url", "image_url": {"url": to_data_url(png)}},
             ]},
         ]
@@ -396,6 +431,9 @@ class ExplainController:
                 _last_user_text(messages),
                 content,
                 detail,
+                image_png=(
+                    _last_user_image(messages) if mode == "region" else None
+                ),
             )
         self.panel.showFollowUpInput()
 
@@ -449,6 +487,18 @@ class ExplainController:
         threading.Thread(
             target=self._run, args=(gen, handle, cursor_tl),
             kwargs={"preset_text": text}, daemon=True,
+        ).start()
+
+    def resubmit_image(self, text, png):
+        """Main thread (History window re-ask of a region record, M7.1):
+        re-sends the saved capture PNG with the stored prompt."""
+        loc = CGEventGetLocation(CGEventCreate(None))
+        gen, handle = self._preempt()
+        print(f"re-ask(image) gen={gen} png={len(png)}b", flush=True)
+        threading.Thread(
+            target=self._runImage,
+            args=(gen, handle, (loc.x, loc.y), text, png),
+            daemon=True,
         ).start()
 
     def _capTurns(self, msgs):

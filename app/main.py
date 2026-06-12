@@ -79,6 +79,8 @@ def main():
     main_window.settings.on_saved = _explain.reloadHotkeys
     main_window.settings.on_record_changed = _explain.pauseHotkeys_
     main_window.on_reask = _explain.resubmit_text
+    main_window.on_reask_image = _explain.resubmit_image
+    _explain.on_open_history = main_window.toggleHistory
     print("Macsist started (menu bar). Config:", str(config.get("server_base_url")))
     AppHelper.runEventLoop()
 

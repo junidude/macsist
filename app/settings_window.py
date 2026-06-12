@@ -52,6 +52,7 @@ MODEL_FIELDS = [("explain_model", "Explain model"), ("vision_model", "Vision mod
 HOTKEY_FIELDS = [
     ("hotkey_explain_text", "Explain hotkey"),
     ("hotkey_explain_region", "Region hotkey"),
+    ("hotkey_open_history", "History hotkey"),
 ]
 ADV_PROMPT_FIELDS = [
     ("system_prompt_text", "System prompt\n(텍스트)"),

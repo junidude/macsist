@@ -20,6 +20,8 @@ import os
 import objc
 from AppKit import (
     NSApp,
+    NSApplicationActivationPolicyAccessory,
+    NSApplicationActivationPolicyRegular,
     NSBackingStoreBuffered,
     NSButton,
     NSFloatingWindowLevel,
@@ -82,6 +84,7 @@ class MainWindowController(NSObject):
         self.history = history
         self.settings = SettingsPaneController.alloc().initWithConfig_(config)
         self.on_reask = None  # set by main.py: ExplainController.resubmit_text
+        self.on_reask_image = None  # main.py: ExplainController.resubmit_image
         self.window = None
         self.tab_view = None
         self.search_field = None
@@ -90,6 +93,8 @@ class MainWindowController(NSObject):
         self.copy_button = None
         self.reask_button = None
         self.enabled_checkbox = None
+        self.save_images_checkbox = None
+        self.save_text_checkbox = None
         self.floating_checkbox = None
         self._all = []  # every record, newest first
         self._filtered = []  # rows currently in the table
@@ -104,6 +109,15 @@ class MainWindowController(NSObject):
     def showSettings(self):
         self._show_("settings")
 
+    def toggleHistory(self):
+        """Global hotkey (main thread via callAfter): show the History tab,
+        or close the window when it's already in front."""
+        if (self.window is not None and self.window.isVisible()
+                and self.window.isKeyWindow()):
+            self.window.performClose_(None)
+        else:
+            self.showHistory()
+
     def _show_(self, tab_id):
         if self.window is None:
             self._buildWindow()
@@ -113,6 +127,9 @@ class MainWindowController(NSObject):
         if origin_env:
             x, y = (float(v) for v in origin_env.split(","))
             self.window.setFrameOrigin_((x, y))
+        # While the window is up the app is a Regular app — Dock + Cmd-Tab.
+        # windowWillClose_ drops back to Accessory (menu-bar only).
+        NSApp.setActivationPolicy_(NSApplicationActivationPolicyRegular)
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
         print(
@@ -120,6 +137,10 @@ class MainWindowController(NSObject):
             f" visible={bool(self.window.isVisible())}",
             flush=True,
         )
+
+    def windowWillClose_(self, notification):
+        NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        print("main window closed -> Accessory policy", flush=True)
 
     def _refreshTab_(self, tab_id):
         if tab_id == "history":
@@ -147,6 +168,7 @@ class MainWindowController(NSObject):
         )
         self.window.setTitle_("Macsist")
         self.window.setReleasedWhenClosed_(False)
+        self.window.setDelegate_(self)  # windowWillClose_ → Accessory policy
         self._applyFloating()
 
         content = self.window.contentView()
@@ -177,30 +199,47 @@ class MainWindowController(NSObject):
         size = container.frame().size
         cw, ch = size.width, size.height
 
-        # top row: search + toggles
+        # row 1: search + 항상 위
         top_y = ch - PADDING - ROW_HEIGHT
-        self.enabled_checkbox = NSButton.checkboxWithTitle_target_action_(
-            "기록 저장", self, "toggleEnabled:"
-        )
-        self.enabled_checkbox.setFrame_(
-            NSMakeRect(cw - PADDING - 90, top_y, 90, ROW_HEIGHT)
-        )
-        container.addSubview_(self.enabled_checkbox)
         self.floating_checkbox = NSButton.checkboxWithTitle_target_action_(
             "항상 위", self, "toggleFloating:"
         )
         self.floating_checkbox.setFrame_(
-            NSMakeRect(cw - PADDING - 90 - 84, top_y, 80, ROW_HEIGHT)
+            NSMakeRect(cw - PADDING - 80, top_y, 80, ROW_HEIGHT)
         )
         container.addSubview_(self.floating_checkbox)
         self.search_field = NSSearchField.alloc().initWithFrame_(
-            NSMakeRect(PADDING, top_y, cw - PADDING * 2 - 90 - 84 - 8, ROW_HEIGHT)
+            NSMakeRect(PADDING, top_y, cw - PADDING * 2 - 80 - 8, ROW_HEIGHT)
         )
         self.search_field.setPlaceholderString_("검색 (질문/응답)")
         self.search_field.setTarget_(self)
         self.search_field.setAction_("searchChanged:")
         self.search_field.setSendsSearchStringImmediately_(True)
         container.addSubview_(self.search_field)
+
+        # row 2: master save toggle + per-mode sub-toggles
+        toggles_y = top_y - ROW_HEIGHT - 4
+        self.enabled_checkbox = NSButton.checkboxWithTitle_target_action_(
+            "기록 저장 (전체)", self, "toggleEnabled:"
+        )
+        self.enabled_checkbox.setFrame_(
+            NSMakeRect(PADDING, toggles_y, 140, ROW_HEIGHT)
+        )
+        container.addSubview_(self.enabled_checkbox)
+        self.save_images_checkbox = NSButton.checkboxWithTitle_target_action_(
+            "이미지 저장", self, "toggleSaveImages:"
+        )
+        self.save_images_checkbox.setFrame_(
+            NSMakeRect(PADDING + 164, toggles_y, 110, ROW_HEIGHT)
+        )
+        container.addSubview_(self.save_images_checkbox)
+        self.save_text_checkbox = NSButton.checkboxWithTitle_target_action_(
+            "텍스트 저장", self, "toggleSaveText:"
+        )
+        self.save_text_checkbox.setFrame_(
+            NSMakeRect(PADDING + 164 + 118, toggles_y, 110, ROW_HEIGHT)
+        )
+        container.addSubview_(self.save_text_checkbox)
 
         # bottom: buttons row, then the detail text above it
         self.copy_button = NSButton.buttonWithTitle_target_action_(
@@ -229,7 +268,7 @@ class MainWindowController(NSObject):
 
         # middle: the record table fills the rest
         table_y = detail_y + DETAIL_HEIGHT + 8
-        table_h = top_y - 8 - table_y
+        table_h = toggles_y - 8 - table_y
         scroll = NSScrollView.alloc().initWithFrame_(
             NSMakeRect(PADDING, table_y, cw - PADDING * 2, table_h)
         )
@@ -257,10 +296,23 @@ class MainWindowController(NSObject):
         self.enabled_checkbox.setState_(
             1 if self.config.get("history_enabled") else 0
         )
+        self.save_images_checkbox.setState_(
+            1 if self.config.get("history_save_images") else 0
+        )
+        self.save_text_checkbox.setState_(
+            1 if self.config.get("history_save_text") else 0
+        )
+        self._applySaveToggleEnabled()
         self.floating_checkbox.setState_(
             1 if self.config.get("history_window_floating") else 0
         )
         self.applyFilter()
+
+    def _applySaveToggleEnabled(self):
+        # sub-toggles are meaningless while the master switch is off
+        master = bool(self.config.get("history_enabled"))
+        self.save_images_checkbox.setEnabled_(master)
+        self.save_text_checkbox.setEnabled_(master)
 
     def applyFilter(self):
         query = str(self.search_field.stringValue()).strip().lower()
@@ -315,8 +367,13 @@ class MainWindowController(NSObject):
         self.detail_view.setString_(_detail_text(record))
         self.detail_view.scrollRangeToVisible_((0, 0))
         self.copy_button.setEnabled_(True)
-        # region records have no stored image — nothing to re-run (spec §5.2)
-        self.reask_button.setEnabled_(record.get("mode") != "region")
+        if record.get("mode") == "region":
+            # re-runnable only when its capture PNG was saved and still exists
+            self.reask_button.setEnabled_(
+                self.history.image_path(record) is not None
+            )
+        else:
+            self.reask_button.setEnabled_(True)
 
     # -- actions -------------------------------------------------------------------
 
@@ -333,16 +390,33 @@ class MainWindowController(NSObject):
 
     def reask_(self, sender):
         record = self._selectedRecord()
-        if record is None or record.get("mode") == "region":
+        if record is None:
             return
-        if self.on_reask is not None:
-            self.on_reask(str(record.get("input", "")))
+        text = str(record.get("input", ""))
+        if record.get("mode") == "region":
+            path = self.history.image_path(record)
+            if path is None or self.on_reask_image is None:
+                return
+            self.on_reask_image(text, path.read_bytes())
+        elif self.on_reask is not None:
+            self.on_reask(text)
 
     def toggleEnabled_(self, sender):
         enabled = bool(sender.state())
         self.config.set("history_enabled", enabled)
         self.config.save()
+        self._applySaveToggleEnabled()
         print(f"history_enabled={enabled}", flush=True)
+
+    def toggleSaveImages_(self, sender):
+        self.config.set("history_save_images", bool(sender.state()))
+        self.config.save()
+        print(f"history_save_images={bool(sender.state())}", flush=True)
+
+    def toggleSaveText_(self, sender):
+        self.config.set("history_save_text", bool(sender.state()))
+        self.config.save()
+        print(f"history_save_text={bool(sender.state())}", flush=True)
 
     def toggleFloating_(self, sender):
         self.config.set("history_window_floating", bool(sender.state()))

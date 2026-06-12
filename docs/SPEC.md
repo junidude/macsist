@@ -82,16 +82,24 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 - **History + main window (M7)** — every completed request (text/region/
   followup, success or partial; content-less errors skipped) appends one JSONL
   record to `~/Library/Application Support/Macsist/history.jsonl`
-  (ts/mode/model/input/response/detail — region records store the prompt, never
-  the base64 image). Written from `_commitSession` (main thread); pruned by
-  atomic file rewrite past `history_max_items`. The menu bar's History…/
+  (ts/mode/model/input/response/detail; region records also save their capture
+  PNG to `history_images/` and reference it by filename — base64 never enters
+  the JSONL). Written from `_commitSession` (main thread); pruned by
+  atomic file rewrite past `history_max_items` (orphaned images deleted). The
+  menu bar's History…/
   Settings… open a regular activating window (NSTabView): History tab =
   master-detail (search field filtering input+response, newest-first table,
   full Q/A detail pane, 복사 / 다시 질문 — re-ask re-runs the stored input
-  through the text pipeline with the current model, disabled for region
-  records), plus "기록 저장" (`history_enabled`) and "항상 위"
-  (`history_window_floating` → NSFloatingWindowLevel) toggles; the list
-  live-refreshes while visible (`HistoryStore.on_appended`).
+  with the current model; region records re-send their saved PNG through the
+  vision pipeline, disabled only when no image file exists), save toggles
+  "기록 저장 (전체)" (`history_enabled`, master) with per-mode sub-toggles
+  "이미지 저장" (`history_save_images`) / "텍스트 저장" (`history_save_text`),
+  and "항상 위" (`history_window_floating` → NSFloatingWindowLevel); the list
+  live-refreshes while visible (`HistoryStore.on_appended`). Cmd-Tab: while
+  the window is open the app switches to the **Regular** activation policy
+  (Dock + Cmd-Tab; name shows as "Python" until the M10 bundle) and reverts to
+  Accessory on close; a global hotkey (`hotkey_open_history`, default ⌘⇧H,
+  recordable in Settings) toggles the window from anywhere.
 
 ### File map (`app/`)
 | File | Role |
@@ -116,13 +124,15 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 `system_prompt_text`, `system_prompt_image`, `user_prompt_image`,
 `explain_detail` + `detail_levels` (label / prompt_suffix / max_tokens),
 `hotkey_explain_text` (default `<cmd>+<shift>+e`), `hotkey_explain_region`
-(default `<cmd>+<shift>+r`), `max_tokens`, `temperature`,
+(default `<cmd>+<shift>+r`), `hotkey_open_history` (default `<cmd>+<shift>+h`
+— toggles the History window), `max_tokens`, `temperature`,
 `chat_template_kwargs`, `request_connect_timeout`, `request_read_timeout`,
 `capture_copy_timeout`, `capture_modifier_release_timeout`, `capture_max_chars`,
 `region_max_dim`, `panel_width`, `panel_height`, `panel_height_expanded`,
 `panel_cursor_offset`, `followup_max_turns`,
 `health_poll_interval`, `health_poll_timeout`,
-`history_enabled`, `history_max_items`, `history_snippet_chars`
+`history_enabled` (master) / `history_save_text` / `history_save_images`
+(per-mode), `history_max_items`, `history_snippet_chars`
 (= `capture_max_chars` by default so text inputs are stored losslessly for
 re-ask), `history_window_floating`.
 
@@ -232,8 +242,12 @@ typing without activating our app; the source app keeps visual focus).
 - **Store:** JSONL at `~/Library/Application Support/Macsist/history.jsonl`
   (append-only; one record per completed request: ts, mode
   text/region/followup, model, input snippet ≤`history_snippet_chars`, full
-  response, detail level). Region mode stores the prompt + response, **not the
-  image** (size). `history_enabled` + `history_max_items` *(config)*; pruning
+  response, detail level). Region records save the capture PNG to
+  `history_images/<uuid>.png` (referenced by filename — base64 never enters
+  the JSONL) so 다시 질문 can re-send it; pruning deletes unreferenced images.
+  Saving is gated per mode: `history_enabled` (master) +
+  `history_save_text` (text/followup records) + `history_save_images`
+  (region records incl. PNG); `history_max_items` *(config)*; pruning
   rewrites the file.
 - **Window:** a regular activating window (toggled from the menu bar, optional
   "항상 위" floating toggle), list of past Q/A newest-first with search field;
@@ -351,6 +365,15 @@ memory `verify-ui-without-screenshots`).
   flips the window level, Settings tab loads/saves config with validation and
   fires on_saved (AC: edits apply without restart), flap toggles without
   resizing the window.
+  *M7.1 follow-up (2026-06-12, verified):* region captures saved to
+  `history_images/` + re-ask re-sends the PNG (store tests: image file/ref,
+  per-mode gating, orphan-image prune; harness: image-row re-ask passes
+  prompt+bytes, imageless region row stays disabled, sub-toggle gating; live
+  e2e: capture → PNG on disk → resubmit_image streamed a new region record);
+  save toggles split into master + 이미지/텍스트 sub-toggles; Cmd-Tab via
+  Regular-policy switch while the window is open (harness-verified both
+  directions) + ⌘⇧H global toggle hotkey (recordable; registered binding seen
+  in the listener log).
 - **M8 — Glass UI** (§5.3).
   *AC:* panel + history window render with glass material, rounded corners,
   fade animations, correct light/dark; no regression in never-steal-focus.

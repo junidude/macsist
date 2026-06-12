@@ -12,12 +12,16 @@ LLM (MLX). No cloud, no Electron.
   local vision model.
 - **Follow-up questions**: after an answer, type "이어서 질문…" directly in the
   panel — same conversation, same model (vision sessions keep the image).
-- **History** (menu-bar icon → History…): every completed explain is saved to
-  `~/Library/Application Support/Macsist/history.jsonl` (text only —
-  region screenshots are never stored). The window lists past Q/A newest-first
-  with search; select a row for the full text, then 복사 or 다시 질문 (re-runs
-  it with the current model). "기록 저장" toggles saving off; "항상 위" keeps
-  the window floating.
+- **History** (menu-bar icon → History…, or `⌘⇧H` from anywhere): every
+  completed explain is saved to
+  `~/Library/Application Support/Macsist/history.jsonl`; region captures keep
+  their screenshot in `history_images/` so they can be re-asked too. The
+  window lists past Q/A newest-first with search; select a row for the full
+  text, then 복사 or 다시 질문 (re-runs it with the current model — region
+  rows re-send the saved screenshot). Saving is controlled by "기록 저장
+  (전체)" with per-mode sub-toggles "이미지 저장" / "텍스트 저장"; "항상 위"
+  keeps the window floating. While the window is open the app appears in
+  Cmd-Tab (shown as "Python" until it ships as a bundle in M10).
 - Settings (menu-bar icon, a tab of the History window): server URL,
   explain/vision models (picker from the server's loaded models), hotkey
   recorder, detail level (간단/보통/자세히), and a 고급 설정 flap (system

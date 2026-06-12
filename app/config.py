@@ -70,6 +70,8 @@ DEFAULTS = {
     },
     "hotkey_explain_text": "<cmd>+<shift>+e",
     "hotkey_explain_region": "<cmd>+<shift>+r",
+    # History 윈도우 토글 (Cmd-Tab 미등장 보완 — Accessory 앱)
+    "hotkey_open_history": "<cmd>+<shift>+h",
     "max_tokens": 512,
     "temperature": 0.7,
     # Thinking models (e.g. Qwen3.6-27B) stream chain-of-thought as
@@ -95,6 +97,11 @@ DEFAULTS = {
     # snippet == capture_max_chars so text-mode inputs are stored losslessly
     # (re-ask re-runs the stored input verbatim).
     "history_enabled": True,
+    # per-mode sub-toggles under the master switch: text/followup records vs
+    # region records (region saves the capture PNG to history_images/ so
+    # 다시 질문 can re-send it)
+    "history_save_text": True,
+    "history_save_images": True,
     "history_max_items": 500,
     "history_snippet_chars": 4000,
     "history_window_floating": False,

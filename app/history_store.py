@@ -1,9 +1,15 @@
 """HistoryStore — append-only JSONL history of completed explains (M7).
 
 One record per completed request (text/region/followup), written from
-ExplainController._commitSession. Region records hold the prompt + response
-only — never the base64 image (size). Pruning rewrites the file atomically
-(temp + os.replace) keeping the newest `history_max_items`.
+ExplainController._commitSession. Region records save the capture PNG to
+`history_images/<uuid>.png` next to the JSONL (when `history_save_images` is
+on) so 다시 질문 can re-send it; the JSONL itself never holds base64. Pruning
+rewrites the file atomically (temp + os.replace) keeping the newest
+`history_max_items`, and deletes image files no surviving record references.
+
+Saving is gated per mode: `history_enabled` is the master switch,
+`history_save_text` covers text/followup records, `history_save_images`
+covers region records (record + PNG together).
 
 Threading: main-thread-only by design. Appends come from _commitSession
 (marshalled via AppHelper.callAfter), reads from the History window — both on
@@ -12,6 +18,7 @@ the main thread, so no lock is needed. Do not call from worker threads.
 
 import json
 import os
+import uuid
 from datetime import datetime
 
 from config import CONFIG_DIR
@@ -23,6 +30,7 @@ class HistoryStore:
     def __init__(self, config, path=None):
         self.config = config
         self.path = path or HISTORY_PATH
+        self.images_dir = self.path.parent / "history_images"
         self.on_appended = None  # History window: refresh while visible
         self._count = self._countLines()
 
@@ -33,8 +41,14 @@ class HistoryStore:
         except OSError:
             return 0
 
-    def append(self, mode, model, input_text, response, detail):
+    def append(self, mode, model, input_text, response, detail,
+               image_png=None):
         if not self.config.get("history_enabled"):
+            return
+        if mode == "region":
+            if not self.config.get("history_save_images"):
+                return
+        elif not self.config.get("history_save_text"):
             return
         snippet_chars = int(self.config.get("history_snippet_chars"))
         record = {
@@ -45,6 +59,11 @@ class HistoryStore:
             "response": response,
             "detail": detail,
         }
+        if image_png and mode == "region":
+            name = uuid.uuid4().hex + ".png"
+            self.images_dir.mkdir(parents=True, exist_ok=True)
+            (self.images_dir / name).write_bytes(image_png)
+            record["image"] = name
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -64,7 +83,22 @@ class HistoryStore:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         os.replace(tmp, self.path)
         self._count = len(keep)
+        referenced = {r["image"] for r in keep if r.get("image")}
+        try:
+            for file in self.images_dir.glob("*.png"):
+                if file.name not in referenced:
+                    file.unlink()
+        except OSError:
+            pass
         print(f"history pruned to {self._count} records", flush=True)
+
+    def image_path(self, record):
+        """Path of the record's saved capture, or None (no image / deleted)."""
+        name = record.get("image")
+        if not name:
+            return None
+        path = self.images_dir / name
+        return path if path.exists() else None
 
     def load(self):
         """All records, newest first. Corrupt lines are skipped, never fatal."""
