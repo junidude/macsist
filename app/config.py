@@ -76,6 +76,13 @@ DEFAULTS = {
     "panel_cursor_offset": 12.0,
     # follow-up 대화 깊이: 원래 질문/답 + N개의 추가 질문/답 쌍, 오래된 쌍부터 삭제
     "followup_max_turns": 5,
+    # M7 history: JSONL at CONFIG_DIR/history.jsonl, pruned by file rewrite.
+    # snippet == capture_max_chars so text-mode inputs are stored losslessly
+    # (re-ask re-runs the stored input verbatim).
+    "history_enabled": True,
+    "history_max_items": 500,
+    "history_snippet_chars": 4000,
+    "history_window_floating": False,
 }
 
 

@@ -32,7 +32,9 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
   progress ("생각 중… N자") for reasoning models, clean one-line Korean errors.
 - **Cancellation** — any hotkey press preempts everything in flight (stream +
   pending region overlay). Panel dismiss also cancels.
-- **Settings window** — server URL; explain/vision model comboboxes populated
+- **Settings** (M7: a tab of the History/main window — `SettingsPaneController`
+  builds into the tab's view, no standalone window) — server URL; explain/vision
+  model comboboxes populated
   live from `/v1/models` (free text works when server is down); hotkey
   recorder (click → press combo, keyCode-based); detail level (간단/보통/자세히)
   changing prompt suffix + max_tokens. **고급 설정 flap**: both system prompts
@@ -69,6 +71,19 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
   sessions keep the image). First Esc leaves the field (key handed back via
   orderOut+orderFrontRegardless), second Esc dismisses; first follow-up grows
   the panel to `panel_height_expanded`; any hotkey press starts a fresh session.
+- **History + main window (M7)** — every completed request (text/region/
+  followup, success or partial; content-less errors skipped) appends one JSONL
+  record to `~/Library/Application Support/HotkeyExplain/history.jsonl`
+  (ts/mode/model/input/response/detail — region records store the prompt, never
+  the base64 image). Written from `_commitSession` (main thread); pruned by
+  atomic file rewrite past `history_max_items`. The menu bar's History…/
+  Settings… open a regular activating window (NSTabView): History tab =
+  master-detail (search field filtering input+response, newest-first table,
+  full Q/A detail pane, 복사 / 다시 질문 — re-ask re-runs the stored input
+  through the text pipeline with the current model, disabled for region
+  records), plus "기록 저장" (`history_enabled`) and "항상 위"
+  (`history_window_floating` → NSFloatingWindowLevel) toggles; the list
+  live-refreshes while visible (`HistoryStore.on_appended`).
 
 ### File map (`app/`)
 | File | Role |
@@ -81,8 +96,10 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `llm_client.py` | httpx SSE client; `StreamHandle.cancel()` (raw socket shutdown); `on_reasoning`; per-call `model`/`max_tokens` override; 503 `model_loading` → "모델 로딩 중" |
 | `health.py` | `ServerHealthMonitor` — `/health` polling thread, ok/loading/down, `poke()` |
 | `result_panel.py` | floating panel — never-key except while the follow-up input is focused (`_allow_key` gate, M6); NSEvent monitors for dismiss/click-to-focus/two-stage Esc; streaming transcript + bottom input row |
-| `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping) |
-| `settings_window.py` | settings UI (combos / recorders / detail segments) |
+| `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping); M7 history commit + `resubmit_text` (re-ask) |
+| `settings_window.py` | `SettingsPaneController` — settings controls built into a host view (combos / recorders / detail segments / 고급 flap); window-less since M7 |
+| `main_window.py` | `MainWindowController` — History/Settings window (NSTabView, master-detail history list, search, copy/re-ask, 기록 저장·항상 위 toggles) |
+| `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune |
 | `config.py` | JSON store at `~/Library/Application Support/HotkeyExplain/config.json` |
 | `run.sh` / `deploy.sh` | dev run / launchd deploy |
 
@@ -96,7 +113,10 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 `capture_copy_timeout`, `capture_modifier_release_timeout`, `capture_max_chars`,
 `region_max_dim`, `panel_width`, `panel_height`, `panel_height_expanded`,
 `panel_cursor_offset`, `followup_max_turns`,
-`health_poll_interval`, `health_poll_timeout`.
+`health_poll_interval`, `health_poll_timeout`,
+`history_enabled`, `history_max_items`, `history_snippet_chars`
+(= `capture_max_chars` by default so text inputs are stored losslessly for
+re-ask), `history_window_floating`.
 
 ### Debug hooks (env vars, kept for agent-driven verification)
 `HE_DEBUG_EXPLAIN_AFTER` / `HE_DEBUG_EXPLAIN_REGION_AFTER` (comma-separated
@@ -104,8 +124,9 @@ seconds — fire hotkey paths programmatically), `HE_DEBUG_FAKE_TEXT` (bypass
 capture), `HE_DEBUG_REGION_RECT="x,y,w,h"` (bypass interactive overlay),
 `HE_DEBUG_KEEP_PANEL` (don't install dismiss monitors — note: also disables
 M6 click-to-focus, which lives in the local monitor), `HE_DEBUG_FRAME`,
-`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_OPEN_SETTINGS` (seconds — open the settings
-window), `HE_DEBUG_WIN_ORIGIN="x,y"`,
+`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_OPEN_SETTINGS` / `HE_DEBUG_OPEN_HISTORY`
+(seconds — open the main window on that tab), `HE_DEBUG_WIN_ORIGIN="x,y"`
+(main-window origin),
 `HE_DEBUG_FOLLOWUP_AFTER` (comma-separated seconds — submit a follow-up
 programmatically) + `HE_DEBUG_FOLLOWUP_TEXT` (its question),
 `HE_DEBUG_FOLLOWUP_KEYCYCLE` (seconds — focus the input, log key/first-responder
@@ -304,11 +325,24 @@ memory `verify-ui-without-screenshots`).
   input confirmed (2026-06-12): click-to-focus, typed Korean + Return submit,
   source app keeps working during the follow-up, Esc/Esc two-stage dismiss,
   IME-composition Esc (cancels the 조합, not the field). **Fully verified.**
-- **M7 — History + main window** (§5.2). System-prompt/advanced editing already
-  ships in the settings window (고급 설정 flap) — M7 relocates the existing
-  settings controls into this window's Settings tab, no new editing UI.
-  *AC:* past explains searchable in the window; settings edits there apply
-  without restart; history survives app restart; disable toggle works.
+- **M7 — History + main window** (§5.2). **DONE (2026-06-12).** System-prompt/
+  advanced editing already shipped in the settings window (고급 설정 flap) —
+  M7 relocated the existing settings controls into this window's Settings tab
+  (container-injection refactor: `SettingsPaneController.buildInView_`, flap
+  is pure show/hide), no new editing UI. History list is master-detail (table
+  + fixed detail pane) by design — inline row expansion was rejected because
+  this bundle-less app cannot be verified by screenshots.
+  *AC verified:* standalone store tests (append/load order, snippet truncation,
+  atomic prune, corrupt-line skip, restart survival) + live dev run with debug
+  hooks wrote text/followup/region records to history.jsonl (schema exact, no
+  base64, vision model recorded for region) + window harness (M6-style,
+  /tmp/m7_history_harness.py): search filters input AND response (AC:
+  searchable), row select → full Q/A detail, copy → pasteboard, re-ask fires
+  with the stored input and is disabled for region rows, 기록 저장 off →
+  appends become no-ops (AC: disable toggle), on_appended live-refresh, 항상 위
+  flips the window level, Settings tab loads/saves config with validation and
+  fires on_saved (AC: edits apply without restart), flap toggles without
+  resizing the window.
 - **M8 — Glass UI** (§5.3).
   *AC:* panel + history window render with glass material, rounded corners,
   fade animations, correct light/dark; no regression in never-steal-focus.

@@ -1,19 +1,21 @@
-"""SettingsWindowController — minimal native settings window (M0 scope).
+"""SettingsPaneController — the Settings controls, built into a host view.
 
-Edits server URL, model ids, and hotkeys; full settings UI lands in M4.
-A regular activating window is fine here — the non-activating requirement
-applies only to the ResultPanel (M2).
+Until M7 this owned its own window; now the controls land in a container
+NSView supplied by MainWindowController (the History/Settings window's
+Settings tab). Window concerns — activation, sizing, debug origin — live
+with the window owner; this controller keeps everything else: field
+population, the hotkey recorder, validation and Save.
 
 Model fields are editable NSComboBoxes: the dropdown lists the models
 currently loaded on the server (/v1/models, fetched on a background thread
-each time the window opens), while free text keeps working when the server is
-down or for a model id not in the list.
+each time the pane is shown), while free text keeps working when the server
+is down or for a model id not in the list.
 
-The "고급 설정" toggle expands the window with the fields most LLM UIs hide
-behind an Advanced flap: the system prompts (e.g. translate-first behavior),
-image user prompt, temperature, max_tokens, follow-up turn cap and
-chat_template_kwargs. Top-anchored views carry NSViewMinYMargin so the window
-can resize from the bottom edge; the save row sticks to the bottom.
+The "고급 설정" flap toggles the fields most LLM UIs hide behind Advanced:
+the system prompts (e.g. translate-first behavior), image user prompt,
+temperature, max_tokens, follow-up turn cap and chat_template_kwargs. The
+host view is always tall enough for the expanded layout, so the flap is a
+pure show/hide — no window resizing (that was the old standalone window).
 """
 
 import json
@@ -22,8 +24,6 @@ import threading
 import httpx
 import objc
 from AppKit import (
-    NSApp,
-    NSBackingStoreBuffered,
     NSButton,
     NSComboBox,
     NSEvent,
@@ -39,10 +39,6 @@ from AppKit import (
     NSSegmentSwitchTrackingSelectOne,
     NSTextField,
     NSTextView,
-    NSViewMinYMargin,
-    NSWindow,
-    NSWindowStyleMaskClosable,
-    NSWindowStyleMaskTitled,
 )
 from PyObjCTools import AppHelper
 
@@ -77,13 +73,27 @@ ROW_GAP = 12
 PROMPT_HEIGHT = 64
 
 
-class SettingsWindowController(NSObject):
+def pane_min_size():
+    """(width, height) the Settings pane needs with the flap expanded —
+    MainWindowController sizes the tab content to at least this."""
+    width = PADDING * 2 + LABEL_WIDTH + 8 + FIELD_WIDTH
+    basic_rows = 2 + len(MODEL_FIELDS) + len(HOTKEY_FIELDS)
+    collapsed = PADDING * 2 + ROW_HEIGHT * (basic_rows + 1) + ROW_GAP * basic_rows
+    expanded = (
+        collapsed
+        + len(ADV_PROMPT_FIELDS) * (PROMPT_HEIGHT + ROW_GAP)
+        + 4 * (ROW_HEIGHT + ROW_GAP)
+    )
+    return width, expanded
+
+
+class SettingsPaneController(NSObject):
     def initWithConfig_(self, config):
-        self = objc.super(SettingsWindowController, self).init()
+        self = objc.super(SettingsPaneController, self).init()
         if self is None:
             return None
         self.config = config
-        self.window = None
+        self.container = None  # host NSView, injected via buildInView_
         self.url_field = None
         self.model_fields = {}  # config key -> NSComboBox
         self.hotkey_buttons = {}  # config key -> NSButton
@@ -100,9 +110,6 @@ class SettingsWindowController(NSObject):
         self.advanced_button = None
         self._advanced_views = []
         self._advanced_visible = False
-        self._collapsed_height = 0
-        self._expanded_height = 0
-        self._win_width = 0
         self.on_saved = None  # set by main.py: ExplainController.reloadHotkeys
         self.on_record_changed = None  # set by main.py: pause hotkeys while recording
         self._hotkey_bindings = {}  # config key -> pynput format, saved on Save
@@ -110,9 +117,9 @@ class SettingsWindowController(NSObject):
         self._record_monitor = None
         return self
 
-    def show(self):
-        if self.window is None:
-            self._buildWindow()
+    def refresh(self):
+        """(Re)load every field from config — called each time the Settings
+        tab is shown. buildInView_ must have run first."""
         self._endRecording_(None)  # drop a stale recording session, if any
         self.url_field.setStringValue_(self.config.get("server_base_url"))
         for key, field in self.model_fields.items():
@@ -138,45 +145,16 @@ class SettingsWindowController(NSObject):
         )
         self.status_label.setStringValue_("")
         self._refreshModelList()
-        import os
-        origin_env = os.environ.get("HE_DEBUG_WIN_ORIGIN")
-        if origin_env:
-            x, y = (float(v) for v in origin_env.split(","))
-            self.window.setFrameOrigin_((x, y))
-        self.window.makeKeyAndOrderFront_(None)
-        NSApp.activateIgnoringOtherApps_(True)
-        print(
-            "settings window shown:", self.window.frame(),
-            "visible:", bool(self.window.isVisible()),
-            flush=True,
-        )
+        print("settings pane refreshed", flush=True)
 
-    def _buildWindow(self):
-        width = PADDING * 2 + LABEL_WIDTH + 8 + FIELD_WIDTH
-        self._win_width = width
-        basic_rows = 2 + len(MODEL_FIELDS) + len(HOTKEY_FIELDS)
-        self._collapsed_height = (
-            PADDING * 2 + ROW_HEIGHT * (basic_rows + 1) + ROW_GAP * basic_rows
-        )
-        # advanced flap: 2 prompt editors + 3 field rows + reset row
-        self._expanded_height = (
-            self._collapsed_height
-            + len(ADV_PROMPT_FIELDS) * (PROMPT_HEIGHT + ROW_GAP)
-            + 4 * (ROW_HEIGHT + ROW_GAP)
-        )
-        # Build at EXPANDED height (all frames laid out top-down), then
-        # collapse: top-anchored views carry NSViewMinYMargin, so shrinking
-        # the window pushes the advanced rows below the content bounds.
-        height = self._expanded_height
-        self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(0, 0, width, height),
-            NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
-            NSBackingStoreBuffered,
-            False,
-        )
-        self.window.setTitle_("HotkeyExplain Settings")
-        self.window.setReleasedWhenClosed_(False)
-        content = self.window.contentView()
+    def buildInView_(self, container):
+        """Lay the controls out top-down inside `container` (the Settings
+        tab's content view). The container is at least pane_min_size(), so
+        every frame fits with the advanced flap expanded."""
+        self.container = container
+        size = container.frame().size
+        width, height = size.width, size.height
+        content = container
 
         y_cursor = [height - PADDING]
 
@@ -187,7 +165,6 @@ class SettingsWindowController(NSObject):
             return y
 
         def pin(view, advanced=False):
-            view.setAutoresizingMask_(NSViewMinYMargin)  # track the top edge
             content.addSubview_(view)
             if advanced:
                 self._advanced_views.append(view)
@@ -329,40 +306,17 @@ class SettingsWindowController(NSObject):
 
         for view in self._advanced_views:
             view.setHidden_(True)
-        self._setContentHeight_animate_(self._collapsed_height, False)
-        self.window.center()
-
-    def _setContentHeight_animate_(self, target_height, animate):
-        frame_rect = self.window.frameRectForContentRect_(
-            NSMakeRect(0, 0, self._win_width, target_height)
-        )
-        old = self.window.frame()
-        self.window.setFrame_display_animate_(
-            NSMakeRect(
-                old.origin.x,
-                old.origin.y + old.size.height - frame_rect.size.height,
-                frame_rect.size.width,
-                frame_rect.size.height,
-            ),
-            True,
-            animate,
-        )
 
     def toggleAdvanced_(self, sender):
         self._advanced_visible = not self._advanced_visible
         for view in self._advanced_views:
             view.setHidden_(not self._advanced_visible)
-        self._setContentHeight_animate_(
-            self._expanded_height if self._advanced_visible
-            else self._collapsed_height,
-            True,
-        )
         self.advanced_button.setTitle_(
             "고급 설정 ▴" if self._advanced_visible else "고급 설정 ▾"
         )
         print(
             "advanced settings", "shown" if self._advanced_visible else "hidden",
-            "frame:", self.window.frame(), flush=True,
+            flush=True,
         )
 
     def resetAdvanced_(self, sender):
@@ -456,7 +410,8 @@ class SettingsWindowController(NSObject):
         threading.Thread(target=fetch, daemon=True).start()
 
     def _applyModelList_(self, ids):
-        if self.window is None or not self.window.isVisible():
+        host = self.container.window() if self.container is not None else None
+        if host is None or not host.isVisible():
             return
         for field in self.model_fields.values():
             typed = str(field.stringValue())  # don't clobber user input

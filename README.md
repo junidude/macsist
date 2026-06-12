@@ -9,8 +9,18 @@ near the cursor, from a **local** LLM (MLX). No cloud, no Electron.
   falling back to a clipboard-safe synthetic ⌘C (clipboard is always restored).
 - **Region explain** (default `⌘⇧R`): ⌘⇧4-style crosshair → the image goes to a
   local vision model.
-- Settings (menu-bar icon): server URL, explain/vision models (picker from the
-  server's loaded models), hotkey recorder, detail level (간단/보통/자세히).
+- **Follow-up questions**: after an answer, type "이어서 질문…" directly in the
+  panel — same conversation, same model (vision sessions keep the image).
+- **History** (menu-bar icon → History…): every completed explain is saved to
+  `~/Library/Application Support/HotkeyExplain/history.jsonl` (text only —
+  region screenshots are never stored). The window lists past Q/A newest-first
+  with search; select a row for the full text, then 복사 or 다시 질문 (re-runs
+  it with the current model). "기록 저장" toggles saving off; "항상 위" keeps
+  the window floating.
+- Settings (menu-bar icon, a tab of the History window): server URL,
+  explain/vision models (picker from the server's loaded models), hotkey
+  recorder, detail level (간단/보통/자세히), and a 고급 설정 flap (system
+  prompts, temperature, max_tokens, …).
 - Stack: Python 3.13 + PyObjC (AppKit), `pynput`, `httpx` SSE; server is
   MLX-backed (`mlx-lm` / `mlx-vlm`) behind a FastAPI proxy. Apple Silicon,
   macOS 26.2+.
@@ -35,8 +45,8 @@ Full spec and architecture: [docs/SPEC.md](docs/SPEC.md).
 ## Roadmap (v2 — designs locked in [docs/SPEC.md](docs/SPEC.md) §5–6)
 
 - **M5** ✅ server status in the menu bar + "model loading" awareness
-- **M6** follow-up questions typed directly into the result panel
-- **M7** persistent history window (searchable past Q/A) with embedded settings
+- **M6** ✅ follow-up questions typed directly into the result panel
+- **M7** ✅ persistent history window (searchable past Q/A) with embedded settings
 - **M8** Liquid-Glass UI redesign (translucent, rounded, animated)
 - **M9** external OpenAI-compatible API providers (for machines that can't host
   a local LLM; keys in the macOS Keychain)

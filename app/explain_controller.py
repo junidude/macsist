@@ -49,11 +49,29 @@ MSG_VISION_HINT = (
 )
 
 
+def _last_user_text(messages):
+    """Text of the last user message, for the history record (M7). Multimodal
+    content keeps only its text parts — region messages embed the screenshot
+    as a base64 image_url, which must never reach history.jsonl."""
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        return " ".join(
+            part.get("text", "") for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
 class ExplainController:
-    def __init__(self, config, panel, health_monitor=None):
+    def __init__(self, config, panel, health_monitor=None, history=None):
         self.config = config
         self.panel = panel
         self.health_monitor = health_monitor
+        self.history = history  # HistoryStore (M7); appends on the main thread
         self.client = LLMClient(config)
         self._lock = threading.Lock()
         self._gen = 0
@@ -190,8 +208,9 @@ class ExplainController:
 
     # -- worker thread ---------------------------------------------------------
 
-    def _run(self, gen, handle, cursor_tl):
-        fake = os.environ.get("HE_DEBUG_FAKE_TEXT")  # bypass capture in tests
+    def _run(self, gen, handle, cursor_tl, preset_text=None):
+        # preset_text: re-ask from the History window (M7) — skip capture.
+        fake = preset_text or os.environ.get("HE_DEBUG_FAKE_TEXT")
         if fake:
             text = fake
         else:
@@ -208,13 +227,14 @@ class ExplainController:
                          MSG_NO_SELECTION)
             return
         self._onMain(gen, self.panel.beginSessionAt_, cursor_tl)
-        suffix, max_tokens = self._detail()
+        suffix, max_tokens, detail = self._detail()
         messages = [
             {"role": "system",
              "content": self.config.get("system_prompt_text") + suffix},
             {"role": "user", "content": text},
         ]
-        self._stream(gen, handle, messages, max_tokens=max_tokens)
+        self._stream(gen, handle, messages, max_tokens=max_tokens,
+                     mode="text", detail=detail)
 
     def _runRegion(self, gen, handle):
         if not CGPreflightScreenCaptureAccess():
@@ -242,7 +262,7 @@ class ExplainController:
         # selection just ended; the mouse sits at its end point
         loc = CGEventGetLocation(CGEventCreate(None))
         self._onMain(gen, self.panel.beginSessionAt_, (loc.x, loc.y))
-        suffix, max_tokens = self._detail()
+        suffix, max_tokens, detail = self._detail()
         messages = [
             {"role": "system",
              "content": self.config.get("system_prompt_image") + suffix},
@@ -256,6 +276,8 @@ class ExplainController:
             model=str(self.config.get("vision_model")),
             max_tokens=max_tokens,
             error_suffix=MSG_VISION_HINT,
+            mode="region",
+            detail=detail,
         )
 
     def _openSettingsPane(self, url):
@@ -281,15 +303,16 @@ class ExplainController:
             self._capture_proc = proc
 
     def _detail(self):
-        """(prompt suffix, max_tokens) for the configured detail level."""
+        """(prompt suffix, max_tokens, level key) for the configured detail."""
         levels = self.config.get("detail_levels")
-        level = levels.get(str(self.config.get("explain_detail")))
+        key = str(self.config.get("explain_detail"))
+        level = levels.get(key)
         if not level:
-            return "", None
-        return str(level.get("prompt_suffix", "")), level.get("max_tokens")
+            return "", None, key
+        return str(level.get("prompt_suffix", "")), level.get("max_tokens"), key
 
     def _stream(self, gen, handle, messages, model=None, max_tokens=None,
-                error_suffix=""):
+                error_suffix="", mode="text", detail=None):
         reasoning_chars = [0]
         parts = []  # accumulated content → assistant message for follow-ups
 
@@ -303,7 +326,7 @@ class ExplainController:
             # LLM errors; capture-stage failures never reach _stream.
             self._onMain(
                 gen, self._commitSession, gen, messages, "".join(parts),
-                model, max_tokens, error_suffix,
+                model, max_tokens, error_suffix, mode, detail,
             )
 
         got_content = False
@@ -343,7 +366,7 @@ class ExplainController:
     # -- follow-up session (M6) ------------------------------------------------
 
     def _commitSession(self, gen, messages, content, model, max_tokens,
-                       error_suffix):
+                       error_suffix, mode, detail):
         """Main thread (via _onMain). Retain the finished conversation so the
         panel's input can extend it. The synthetic assistant message on empty
         content keeps user/assistant alternation valid for chat templates."""
@@ -360,7 +383,20 @@ class ExplainController:
                 "model": model,
                 "max_tokens": max_tokens,
                 "error_suffix": error_suffix,
+                "detail": detail,  # follow-up commits inherit it (M7 history)
             }
+        # M7: one history record per completed request. Content-less runs
+        # (pure errors) are not history; the input snippet takes only the
+        # text parts of the user message — the region base64 never leaves
+        # the messages list.
+        if self.history is not None and content.strip():
+            self.history.append(
+                mode,
+                model or str(self.config.get("explain_model")),
+                _last_user_text(messages),
+                content,
+                detail,
+            )
         self.panel.showFollowUpInput()
 
     def submitFollowUp(self, text):
@@ -387,6 +423,7 @@ class ExplainController:
             model = session["model"]
             max_tokens = session["max_tokens"]
             error_suffix = session["error_suffix"]
+            detail = session.get("detail")
         print(f"follow-up gen={gen} msgs={len(messages)}", flush=True)
         self.panel.beginFollowUp_(text)  # we ARE the main thread
         threading.Thread(
@@ -395,8 +432,23 @@ class ExplainController:
                 "model": model,
                 "max_tokens": max_tokens,
                 "error_suffix": error_suffix,
+                "mode": "followup",
+                "detail": detail,
             },
             daemon=True,
+        ).start()
+
+    def resubmit_text(self, text):
+        """Main thread (History window re-ask, M7). Same semantics as the
+        text hotkey — preempts anything in flight, panel near the cursor —
+        but the input is the stored history snippet instead of a capture."""
+        loc = CGEventGetLocation(CGEventCreate(None))
+        cursor_tl = (loc.x, loc.y)
+        gen, handle = self._preempt()
+        print(f"re-ask gen={gen} chars={len(text)}", flush=True)
+        threading.Thread(
+            target=self._run, args=(gen, handle, cursor_tl),
+            kwargs={"preset_text": text}, daemon=True,
         ).start()
 
     def _capTurns(self, msgs):

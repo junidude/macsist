@@ -9,10 +9,11 @@ Native macOS **menu-bar app** ("macsist / HotkeyExplain"). Global hotkey →
 captures **selected text** or a **screen region** → streams a **concise Korean
 explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default; external OpenAI-compatible providers planned in M9) into a floating
-panel near the cursor. **M0–M6 are shipped and running** (M6: follow-up
-questions — Spotlight-style conditional key-window input in the panel);
-remaining v2 work = M7–M10 (history window, glass UI, providers,
-onboarding installer + `macsist` CLI) — designs in `docs/SPEC.md` §5–6.
+panel near the cursor. **M0–M7 are shipped and running** (M7: JSONL history +
+History/Settings main window — master-detail list, search, copy/re-ask;
+settings controls live in its Settings tab, `SettingsPaneController`);
+remaining v2 work = M8–M10 (glass UI, providers, onboarding installer +
+`macsist` CLI) — designs in `docs/SPEC.md` §5–6.
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit

@@ -10,7 +10,7 @@ from AppKit import (
     NSVariableStatusItemLength,
 )
 
-from settings_window import SettingsWindowController
+from main_window import MainWindowController
 
 # server state → (SF Symbol, title fallback, status-line text)
 _SERVER_STATES = {
@@ -22,12 +22,14 @@ _SERVER_STATES = {
 
 
 class StatusItemController(NSObject):
-    def initWithConfig_(self, config):
+    def initWithConfig_history_(self, config, history):
         self = objc.super(StatusItemController, self).init()
         if self is None:
             return None
         self.config = config
-        self.settings_controller = SettingsWindowController.alloc().initWithConfig_(config)
+        self.main_window = MainWindowController.alloc().initWithConfig_history_(
+            config, history
+        )
 
         self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
             NSVariableStatusItemLength
@@ -40,6 +42,11 @@ class StatusItemController(NSObject):
         self.server_status_item.setEnabled_(False)
         menu.addItem_(self.server_status_item)
         menu.addItem_(NSMenuItem.separatorItem())
+        history_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "History…", "openHistory:", "h"
+        )
+        history_item.setTarget_(self)
+        menu.addItem_(history_item)
         settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Settings…", "openSettings:", ","
         )
@@ -70,6 +77,12 @@ class StatusItemController(NSObject):
             from Foundation import NSTimer
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 float(open_settings), self, "openSettings:", None, False
+            )
+        open_history = os.environ.get("HE_DEBUG_OPEN_HISTORY")
+        if open_history:
+            from Foundation import NSTimer
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                float(open_history), self, "openHistory:", None, False
             )
         return self
 
@@ -103,4 +116,7 @@ class StatusItemController(NSObject):
             button.setTitle_(fallback)
 
     def openSettings_(self, sender):
-        self.settings_controller.show()
+        self.main_window.showSettings()
+
+    def openHistory_(self, sender):
+        self.main_window.showHistory()

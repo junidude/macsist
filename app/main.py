@@ -16,6 +16,7 @@ from explain_controller import URL_PANE_ACCESSIBILITY
 from config import ConfigStore
 from explain_controller import ExplainController
 from health import ServerHealthMonitor
+from history_store import HistoryStore
 from menubar import StatusItemController
 from result_panel import ResultPanelController
 
@@ -64,15 +65,20 @@ def main():
         print("Accessibility not granted — system prompt + settings pane "
               "shown; will auto-relaunch once granted.", flush=True)
     config = ConfigStore()
-    _controller = StatusItemController.alloc().initWithConfig_(config)
+    history = HistoryStore(config)
+    _controller = StatusItemController.alloc().initWithConfig_history_(
+        config, history
+    )
     panel = ResultPanelController.alloc().initWithConfig_(config)
     _health = ServerHealthMonitor(config, on_change=_controller.setServerState_)
-    _explain = ExplainController(config, panel, health_monitor=_health)
+    _explain = ExplainController(config, panel, health_monitor=_health,
+                                 history=history)
     _health.start()
     _explain.start()
-    settings = _controller.settings_controller
-    settings.on_saved = _explain.reloadHotkeys
-    settings.on_record_changed = _explain.pauseHotkeys_
+    main_window = _controller.main_window
+    main_window.settings.on_saved = _explain.reloadHotkeys
+    main_window.settings.on_record_changed = _explain.pauseHotkeys_
+    main_window.on_reask = _explain.resubmit_text
     print("HotkeyExplain started (menu bar). Config:", str(config.get("server_base_url")))
     AppHelper.runEventLoop()
 
