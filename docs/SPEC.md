@@ -53,6 +53,15 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
   errors auto-open the exact System Settings pane (once per run per pane), and
   at startup without Accessibility the app polls the grant every 2 s and
   exec-relaunches itself once granted.
+- **Follow-up questions (M6)** — after an explanation finishes (or errors), a
+  bottom input row ("이어서 질문…") appears in the panel. Clicking it makes the
+  panel key Spotlight-style (conditional `canBecomeKeyWindow`, app never
+  activates); Return streams a contextual answer into the same transcript
+  (❯-prefixed question lines); conversation retained per session
+  (`followup_max_turns` cap, same model as the original request — vision
+  sessions keep the image). First Esc leaves the field (key handed back via
+  orderOut+orderFrontRegardless), second Esc dismisses; first follow-up grows
+  the panel to `panel_height_expanded`; any hotkey press starts a fresh session.
 
 ### File map (`app/`)
 | File | Role |
@@ -64,8 +73,8 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `region_capture.py` | `screencapture -i` subprocess, PNG IHDR dims, `sips -Z` downscale, data-URL |
 | `llm_client.py` | httpx SSE client; `StreamHandle.cancel()` (raw socket shutdown); `on_reasoning`; per-call `model`/`max_tokens` override; 503 `model_loading` → "모델 로딩 중" |
 | `health.py` | `ServerHealthMonitor` — `/health` polling thread, ok/loading/down, `poke()` |
-| `result_panel.py` | never-key floating panel (`canBecomeKeyWindow → False`), NSEvent monitors for dismiss, streaming text view |
-| `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption |
+| `result_panel.py` | floating panel — never-key except while the follow-up input is focused (`_allow_key` gate, M6); NSEvent monitors for dismiss/click-to-focus/two-stage Esc; streaming transcript + bottom input row |
+| `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping) |
 | `settings_window.py` | settings UI (combos / recorders / detail segments) |
 | `config.py` | JSON store at `~/Library/Application Support/HotkeyExplain/config.json` |
 | `run.sh` / `deploy.sh` | dev run / launchd deploy |
@@ -78,15 +87,21 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 (default `<cmd>+<shift>+r`), `max_tokens`, `temperature`,
 `chat_template_kwargs`, `request_connect_timeout`, `request_read_timeout`,
 `capture_copy_timeout`, `capture_modifier_release_timeout`, `capture_max_chars`,
-`region_max_dim`, `panel_width`, `panel_height`, `panel_cursor_offset`,
+`region_max_dim`, `panel_width`, `panel_height`, `panel_height_expanded`,
+`panel_cursor_offset`, `followup_max_turns`,
 `health_poll_interval`, `health_poll_timeout`.
 
 ### Debug hooks (env vars, kept for agent-driven verification)
 `HE_DEBUG_EXPLAIN_AFTER` / `HE_DEBUG_EXPLAIN_REGION_AFTER` (comma-separated
 seconds — fire hotkey paths programmatically), `HE_DEBUG_FAKE_TEXT` (bypass
 capture), `HE_DEBUG_REGION_RECT="x,y,w,h"` (bypass interactive overlay),
-`HE_DEBUG_KEEP_PANEL` (don't install dismiss monitors), `HE_DEBUG_FRAME`,
-`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_WIN_ORIGIN="x,y"`.
+`HE_DEBUG_KEEP_PANEL` (don't install dismiss monitors — note: also disables
+M6 click-to-focus, which lives in the local monitor), `HE_DEBUG_FRAME`,
+`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_WIN_ORIGIN="x,y"`,
+`HE_DEBUG_FOLLOWUP_AFTER` (comma-separated seconds — submit a follow-up
+programmatically) + `HE_DEBUG_FOLLOWUP_TEXT` (its question),
+`HE_DEBUG_FOLLOWUP_KEYCYCLE` (seconds — focus the input, log key/first-responder
+state, unfocus, log handback state).
 
 ---
 
@@ -268,9 +283,18 @@ memory `verify-ui-without-screenshots`).
   (warm-cache window is ~3 s, so the in-app `loading` flip was verified at the
   mapping level), then `ok`; chat during load gets a clean
   `503 model_loading` → "모델 로딩 중입니다".
-- **M6 — Follow-up questions** (§5.1).
-  *AC:* explain → type a follow-up → contextual answer streams in the same
-  panel; source app keeps working; Esc/Esc dismisses; new hotkey = new session.
+- **M6 — Follow-up questions** (§5.1). **DONE (2026-06-12).**
+  *AC verified:* automated (HE_DEBUG hooks) — follow-up streams a contextual
+  answer into the same panel for text AND vision sessions; conversation capped
+  (`followup_max_turns`, oldest pair dropped, system kept); errors show the
+  input too and follow-up errors append without wiping the transcript
+  (synthetic assistant message keeps user/assistant alternation); new hotkey
+  resets to a fresh session at default panel size; key cycle — focus → panel
+  key (field editor first responder), unfocus → key returns to source app
+  (orderOut+orderFrontRegardless handback), panel stays visible. Live human
+  input during verification confirmed click-to-focus + typed Return submit.
+  *Remaining human spot-check:* Esc/Esc two-stage dismiss and IME-composition
+  Esc (Esc with marked text cancels the 조합, not the field).
 - **M7 — History + main window** (§5.2, includes system-prompt editing UI).
   *AC:* past explains searchable in the window; settings edits there apply
   without restart; history survives app restart; disable toggle works.

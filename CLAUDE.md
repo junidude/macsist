@@ -9,9 +9,9 @@ Native macOS **menu-bar app** ("macsist / HotkeyExplain"). Global hotkey →
 captures **selected text** or a **screen region** → streams a **concise Korean
 explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default; external OpenAI-compatible providers planned in M9) into a floating
-panel near the cursor. **M0–M5 are shipped and running** (M5: menu-bar server
-status, 서버 다운/모델 로딩 중 distinction, permission deep links); remaining
-v2 work = M6–M10 (follow-up questions, history window, glass UI, providers,
+panel near the cursor. **M0–M6 are shipped and running** (M6: follow-up
+questions — Spotlight-style conditional key-window input in the panel);
+remaining v2 work = M7–M10 (history window, glass UI, providers,
 onboarding installer + `macsist` CLI) — designs in `docs/SPEC.md` §5–6.
 
 ## Stack (locked)
@@ -30,7 +30,8 @@ onboarding installer + `macsist` CLI) — designs in `docs/SPEC.md` §5–6.
 - Pasteboard: snapshot all items → ⌘C → poll changeCount → restore **only if
   changed**; captures serialized by lock. Never leave the clipboard clobbered.
 - AX `kAXSelectedTextAttribute` first; fall back to synthetic ⌘C.
-- Result panel never steals focus: `canBecomeKeyWindow` override +
+- Result panel never steals focus: `canBecomeKeyWindow` override (M6: True
+  only while the follow-up input is focused — app still never activates) +
   `setHidesOnDeactivate_(False)` + `orderFrontRegardless()` only.
 - Cancel streams only via `StreamHandle.cancel()` (raw socket shutdown —
   `response.close()` cross-thread hangs).

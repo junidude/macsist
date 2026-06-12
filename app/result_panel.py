@@ -2,8 +2,15 @@
 
 Hard rule: must never steal focus from the source app. The NonactivatingPanel
 mask alone is not enough — such a panel can still become key when clicked — so
-the subclass refuses key/main outright and the panel is only ever shown with
+the subclass refuses key/main by default and the panel is only ever shown with
 orderFrontRegardless().
+
+M6 (follow-up questions) carves out the one Spotlight-style exception: while
+the user has clicked into the follow-up input, `canBecomeKeyWindow` returns
+True so keystrokes route to the field WITHOUT activating the app — the source
+app keeps visual focus the whole time. `_allow_key` is the gate; it is set in
+exactly one place (focusInput, on a click in the visible input) and cleared on
+unfocus/reset/dismiss.
 
 All methods are main-thread only (callers marshal via AppHelper.callAfter).
 """
@@ -18,14 +25,18 @@ from AppKit import (
     NSEventMaskRightMouseDown,
     NSEventTypeKeyDown,
     NSFloatingWindowLevel,
+    NSFocusRingTypeNone,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSObject,
     NSPanel,
     NSScreen,
+    NSTextField,
+    NSTextFieldRoundedBezel,
     NSTextView,
     NSViewHeightSizable,
+    NSViewMaxYMargin,
     NSViewWidthSizable,
     NSVisualEffectBlendingModeBehindWindow,
     NSVisualEffectMaterialHUDWindow,
@@ -44,17 +55,29 @@ from Foundation import (
     NSMakeSize,
     NSPointInRect,
 )
+from PyObjCTools import AppHelper
 
 _ESC_KEYCODE = 53
 _PADDING = 10.0
+_INPUT_HEIGHT = 26.0
+_INPUT_GAP = 6.0
+INPUT_PLACEHOLDER = "이어서 질문…"
 
 
 class _NonActivatingPanel(NSPanel):
+    _allow_key = False  # instance attr set by the controller (focus gate)
+
     def canBecomeKeyWindow(self):
-        return False
+        return bool(self._allow_key)
 
     def canBecomeMainWindow(self):
         return False
+
+
+class _FollowUpField(NSTextField):
+    def acceptsFirstMouse_(self, event):
+        # the focusing click also places the caret in one click
+        return True
 
 
 class ResultPanelController(NSObject):
@@ -65,12 +88,19 @@ class ResultPanelController(NSObject):
         self.config = config
         self.panel = None
         self.text_view = None
+        self.input_field = None
         self.on_dismiss = None  # set by ExplainController: cancels the stream
+        self.on_followup = None  # set by ExplainController: submits a follow-up
         self._placeholder = False
+        self._ph_start = 0  # placeholder is always the TAIL of the storage
+        self._followup_mode = False
+        self._expanded = False
+        self._scroll = None
         self._global_monitor = None
         self._local_monitor = None
         self._text_attrs = None
         self._message_attrs = None
+        self._question_attrs = None
         return self
 
     # -- public API (main thread) ------------------------------------------
@@ -79,11 +109,12 @@ class ResultPanelController(NSObject):
         """Clear, reposition near the cursor, show a streaming placeholder."""
         self._presentAt_(cursor_tl)
         self._setText_attrs_("…", self._message_attrs)
+        self._ph_start = 0
         self._placeholder = True
 
     def appendChunk_(self, chunk):
         if self._placeholder:
-            self._setText_attrs_("", self._text_attrs)
+            self._replaceTail_attrs_("", self._text_attrs)
             self._placeholder = False
         storage = self.text_view.textStorage()
         storage.appendAttributedString_(
@@ -97,7 +128,9 @@ class ResultPanelController(NSObject):
         """Quiet placeholder update while a thinking model reasons (no log
         spam — this fires per reasoning token). First content chunk replaces it."""
         if self._placeholder:
-            self._setText_attrs_(f"생각 중… ({char_count}자)", self._message_attrs)
+            self._replaceTail_attrs_(
+                f"생각 중… ({char_count}자)", self._message_attrs
+            )
 
     def showMessageAt_text_(self, cursor_tl, message):
         """One-line status (empty selection, missing permission, LLM error)."""
@@ -105,8 +138,23 @@ class ResultPanelController(NSObject):
         self.showErrorText_(message)
 
     def showErrorText_(self, message):
-        self._setText_attrs_(message, self._message_attrs)
-        self._placeholder = False
+        if self._placeholder:
+            # mid-transcript placeholder ("…" / 생각 중) → replace just the tail
+            self._replaceTail_attrs_(message, self._message_attrs)
+            self._placeholder = False
+        elif self._followup_mode:
+            # never wipe an accumulated follow-up transcript
+            storage = self.text_view.textStorage()
+            storage.appendAttributedString_(
+                NSAttributedString.alloc().initWithString_attributes_(
+                    "\n\n" + message, self._message_attrs
+                )
+            )
+            self.text_view.scrollRangeToVisible_(
+                NSMakeRange(storage.length(), 0)
+            )
+        else:
+            self._setText_attrs_(message, self._message_attrs)
         print("panel message:", message, flush=True)
 
     def finishStream(self):
@@ -116,12 +164,60 @@ class ResultPanelController(NSObject):
             flush=True,
         )
 
+    def showFollowUpInput(self):
+        """Reveal the bottom input row (after a finished/errored explain).
+        Idempotent — also called after every follow-up answer."""
+        if self.input_field is None or not self.input_field.isHidden():
+            return
+        frame = self._scroll.frame()
+        bottom = _PADDING + _INPUT_HEIGHT + _INPUT_GAP
+        top = frame.origin.y + frame.size.height
+        self._scroll.setFrame_(
+            NSMakeRect(frame.origin.x, bottom, frame.size.width, top - bottom)
+        )
+        self.input_field.setHidden_(False)
+        print("follow-up input shown", flush=True)
+
+    def beginFollowUp_(self, question):
+        """Append the question to the transcript and a tail placeholder for
+        the streamed answer; grow the panel on the first follow-up (§5.1)."""
+        self._followup_mode = True
+        if not self._expanded:
+            self._growToExpanded()
+        storage = self.text_view.textStorage()
+        storage.appendAttributedString_(
+            NSAttributedString.alloc().initWithString_attributes_(
+                "\n\n❯ " + question + "\n", self._question_attrs
+            )
+        )
+        self._ph_start = storage.length()
+        storage.appendAttributedString_(
+            NSAttributedString.alloc().initWithString_attributes_(
+                "…", self._message_attrs
+            )
+        )
+        self._placeholder = True
+        self.text_view.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
+
+    def inputAction_(self, sender):
+        # Return key in the input field (sendsActionOnEndEditing is off).
+        text = str(sender.stringValue()).strip()
+        if not text:
+            return
+        sender.setStringValue_("")  # keep focus: consecutive questions
+        if self.on_followup is not None:
+            self.on_followup(text)
+
     def dismiss(self):
         """User-initiated dismiss (Esc / click-away) — also stops the stream."""
         self._remove_monitors()
-        if self.panel is not None and self.panel.isVisible():
-            self.panel.orderOut_(None)
-            print("panel dismissed", flush=True)
+        if self.panel is not None:
+            if self.panel.isKeyWindow():
+                self.panel.makeFirstResponder_(None)
+            self.panel._allow_key = False
+            if self.panel.isVisible():
+                self.panel.orderOut_(None)  # also hands key back to the source app
+                print("panel dismissed", flush=True)
         if self.on_dismiss is not None:
             self.on_dismiss()
 
@@ -148,6 +244,8 @@ class ResultPanelController(NSObject):
         panel.setOpaque_(False)
         panel.setBackgroundColor_(NSColor.clearColor())
         panel.setHasShadow_(True)
+        # defense-in-depth only — the local monitor drives focus explicitly
+        panel.setBecomesKeyOnlyIfNeeded_(True)
 
         effect = NSVisualEffectView.alloc().initWithFrame_(
             NSMakeRect(0, 0, width, height)
@@ -176,6 +274,22 @@ class ResultPanelController(NSObject):
         text_view.setDrawsBackground_(False)
         text_view.setTextContainerInset_(NSMakeSize(4, 4))
 
+        # follow-up input, bottom-pinned, hidden until a session can continue
+        field = _FollowUpField.alloc().initWithFrame_(
+            NSMakeRect(_PADDING, _PADDING, width - 2 * _PADDING, _INPUT_HEIGHT)
+        )
+        field.setPlaceholderString_(INPUT_PLACEHOLDER)
+        field.setFont_(NSFont.systemFontOfSize_(13.0))
+        field.setBezelStyle_(NSTextFieldRoundedBezel)
+        field.setFocusRingType_(NSFocusRingTypeNone)
+        field.setTarget_(self)
+        field.setAction_("inputAction:")
+        # action on Return ONLY — end-editing on focus loss must not submit
+        field.cell().setSendsActionOnEndEditing_(False)
+        field.setAutoresizingMask_(NSViewWidthSizable | NSViewMaxYMargin)
+        field.setHidden_(True)
+        effect.addSubview_(field)
+
         self._text_attrs = {
             NSFontAttributeName: NSFont.systemFontOfSize_(13.0),
             NSForegroundColorAttributeName: NSColor.labelColor(),
@@ -184,8 +298,14 @@ class ResultPanelController(NSObject):
             NSFontAttributeName: NSFont.systemFontOfSize_(13.0),
             NSForegroundColorAttributeName: NSColor.secondaryLabelColor(),
         }
+        self._question_attrs = {
+            NSFontAttributeName: NSFont.boldSystemFontOfSize_(13.0),
+            NSForegroundColorAttributeName: NSColor.labelColor(),
+        }
         self.panel = panel
         self.text_view = text_view
+        self.input_field = field
+        self._scroll = scroll
 
     # -- presentation ---------------------------------------------------------
 
@@ -197,6 +317,7 @@ class ResultPanelController(NSObject):
         the in-flight stream, which would kill the request being presented."""
         if self.panel is None:
             self._buildPanel()
+        self._resetSessionUI()  # new session: input/key/size back to defaults
         x, y_tl = cursor_tl
         # AppKit's global coordinate space is bottom-left-origin, flipped
         # against the primary screen (screens()[0]), not the cursor's screen.
@@ -232,6 +353,106 @@ class ResultPanelController(NSObject):
             NSAttributedString.alloc().initWithString_attributes_(text, attrs)
         )
 
+    def _replaceTail_attrs_(self, text, attrs):
+        """Replace the placeholder tail (from _ph_start to the end)."""
+        storage = self.text_view.textStorage()
+        storage.replaceCharactersInRange_withAttributedString_(
+            NSMakeRange(self._ph_start, storage.length() - self._ph_start),
+            NSAttributedString.alloc().initWithString_attributes_(text, attrs),
+        )
+
+    # -- follow-up focus / layout (M6) ---------------------------------------
+
+    def focusInput(self):
+        """Make the panel key Spotlight-style: keystrokes route to the input
+        field but the app is never activated (NonactivatingPanel), so the
+        source app keeps visual focus. The ONLY place _allow_key is set."""
+        if self.input_field is None or self.input_field.isHidden():
+            return
+        self.panel._allow_key = True
+        self.panel.makeKeyWindow()
+        self.panel.makeFirstResponder_(self.input_field)
+        print("input focused, key =", bool(self.panel.isKeyWindow()), flush=True)
+
+    def _unfocusInput(self):
+        """Leave the field and hand the keyboard back to the source app.
+        Flipping canBecomeKeyWindow does nothing to an already-key window —
+        it is only consulted at make-key time — so the panel must leave the
+        screen list for the window server to re-key the active app (which is
+        still the source app: we never activated). Fallback if this ever
+        blinks: NSWorkspace.frontmostApplication().activateWithOptions_()."""
+        if self.panel is None:
+            return
+        self.panel.makeFirstResponder_(None)
+        self.panel._allow_key = False
+        if self.panel.isKeyWindow():
+            self.panel.orderOut_(None)
+            self.panel.orderFrontRegardless()
+        print("input unfocused, key =", bool(self.panel.isKeyWindow()), flush=True)
+
+    def _resetSessionUI(self):
+        """New session/presentation: drop key status, hide+clear the input,
+        restore default panel/scroll geometry. Must NOT cancel anything
+        (_presentAt_ deliberately doesn't route through dismiss())."""
+        if self.input_field is None:
+            return
+        if self.panel.isKeyWindow():
+            self.panel.makeFirstResponder_(None)
+            self.panel.orderOut_(None)  # _presentAt_ re-shows right after
+        self.panel._allow_key = False
+        self.input_field.setStringValue_("")
+        self.input_field.setHidden_(True)
+        width = float(self.config.get("panel_width"))
+        height = float(self.config.get("panel_height"))
+        frame = self.panel.frame()
+        if frame.size.width != width or frame.size.height != height:
+            self.panel.setFrame_display_(
+                NSMakeRect(
+                    frame.origin.x,
+                    frame.origin.y + frame.size.height - height,  # keep top edge
+                    width,
+                    height,
+                ),
+                False,
+            )
+        self._scroll.setFrame_(
+            NSMakeRect(
+                _PADDING, _PADDING, width - 2 * _PADDING, height - 2 * _PADDING
+            )
+        )
+        self._followup_mode = False
+        self._expanded = False
+        self._ph_start = 0
+
+    def _growToExpanded(self):
+        """Grow to panel_height_expanded keeping the top edge; clamp into the
+        screen's visible frame (§5.1)."""
+        self._expanded = True
+        new_h = float(self.config.get("panel_height_expanded"))
+        frame = self.panel.frame()
+        if new_h <= frame.size.height:
+            return
+        screen = self.panel.screen() or NSScreen.mainScreen()
+        vf = screen.visibleFrame()
+        oy = frame.origin.y + frame.size.height - new_h
+        ox = max(
+            vf.origin.x,
+            min(frame.origin.x, vf.origin.x + vf.size.width - frame.size.width),
+        )
+        oy = max(vf.origin.y, min(oy, vf.origin.y + vf.size.height - new_h))
+        self.panel.setFrame_display_animate_(
+            NSMakeRect(ox, oy, frame.size.width, new_h), True, True
+        )
+        print(f"panel expanded to {new_h:.0f}", flush=True)
+
+    def _isInputDescendant_(self, view):
+        # the field editor lives inside the field's view tree while editing
+        while view is not None:
+            if view is self.input_field:
+                return True
+            view = view.superview()
+        return False
+
     # -- dismiss monitors -----------------------------------------------------
     # The panel is never key, so it receives no keyDown directly; global+local
     # NSEvent monitors are the standard idiom for a never-key window. The
@@ -266,11 +487,55 @@ class ResultPanelController(NSObject):
             self._local_monitor = None
 
     def _handleGlobalEvent_(self, event):
+        # other apps' events: the panel is never key from their perspective.
+        # While the input IS focused, our panel is key, so a click in another
+        # app or the second Esc lands here → dismiss (orderOut hands key back).
         self._maybeDismissForEvent_(event)
 
     def _handleLocalEvent_(self, event):
+        if event.type() == NSEventTypeKeyDown:
+            if (
+                event.keyCode() == _ESC_KEYCODE
+                and self.panel is not None
+                and self.panel.isKeyWindow()
+            ):
+                editor = self.panel.firstResponder()
+                if (
+                    editor is not None
+                    and hasattr(editor, "hasMarkedText")
+                    and editor.hasMarkedText()
+                ):
+                    return event  # mid-IME composition: Esc cancels the 조합
+                # first Esc: clear + leave the field, do NOT dismiss
+                self.input_field.setStringValue_("")
+                self._unfocusInput()
+                return None  # swallow — field editor must not also see it
+            self._maybeDismissForEvent_(event)
+            return event
+        # mouse down on our own windows
+        if (
+            self.panel is not None
+            and self.panel.isVisible()
+            and event.window() is self.panel
+            and NSPointInRect(NSEvent.mouseLocation(), self.panel.frame())
+        ):
+            hit = self.panel.contentView().hitTest_(event.locationInWindow())
+            if (
+                self.input_field is not None
+                and not self.input_field.isHidden()
+                and self._isInputDescendant_(hit)
+            ):
+                # deterministic focus: don't rely on first-click auto-keying
+                self.focusInput()
+                return event  # the same click then places the caret
+            if self.panel.isKeyWindow():
+                # click on the transcript while typing → leave the field;
+                # defer the orderOut handback until this click has dispatched
+                self.panel.makeFirstResponder_(None)
+                AppHelper.callAfter(self._unfocusInput)
+            return event  # clicks inside the panel never dismiss (unchanged)
         self._maybeDismissForEvent_(event)
-        return event  # pass the event through
+        return event
 
     def _maybeDismissForEvent_(self, event):
         if event.type() == NSEventTypeKeyDown:

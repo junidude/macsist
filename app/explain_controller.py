@@ -59,7 +59,13 @@ class ExplainController:
         self._gen = 0
         self._handle = None
         self._capture_proc = None  # pending `screencapture -i` (region mode)
+        # M6: retained conversation for the panel's follow-up input —
+        # {gen, messages, model, max_tokens, error_suffix}; None when no
+        # session can continue (cleared on preempt/dismiss; region sessions
+        # hold the base64 PNG, so clearing also releases that memory).
+        self._session = None
         panel.on_dismiss = self._onPanelDismissed
+        panel.on_followup = self.submitFollowUp
         self._opened_panes = set()  # System Settings panes opened this run
         self.hotkeys = HotkeyManager(self._bindings())
 
@@ -85,6 +91,54 @@ class ExplainController:
                     timer.daemon = True
                     timer.start()
                 print(f"{env}: firing at {delays}s", flush=True)
+        # M6 hooks: submit a follow-up / exercise the key-window cycle
+        # programmatically (submitFollowUp is main-thread-only → callAfter)
+        delays = os.environ.get("HE_DEBUG_FOLLOWUP_AFTER")
+        if delays:
+            text = os.environ.get(
+                "HE_DEBUG_FOLLOWUP_TEXT", "방금 답을 한 문장으로 요약해줘"
+            )
+            for delay in delays.split(","):
+                timer = threading.Timer(
+                    float(delay),
+                    lambda: AppHelper.callAfter(self.submitFollowUp, text),
+                )
+                timer.daemon = True
+                timer.start()
+            print(f"HE_DEBUG_FOLLOWUP_AFTER: firing at {delays}s", flush=True)
+        keycycle = os.environ.get("HE_DEBUG_FOLLOWUP_KEYCYCLE")
+        if keycycle:
+            def cycle():
+                def step2():
+                    self.panel._unfocusInput()
+                    print(
+                        "keycycle: key =",
+                        bool(self.panel.panel.isKeyWindow()),
+                        "visible =", bool(self.panel.panel.isVisible()),
+                        flush=True,
+                    )
+
+                def step1():
+                    self.panel.focusInput()
+                    print(
+                        "keycycle: key =",
+                        bool(self.panel.panel.isKeyWindow()),
+                        "fr =",
+                        type(self.panel.panel.firstResponder()).__name__,
+                        flush=True,
+                    )
+                    t2 = threading.Timer(
+                        1.0, lambda: AppHelper.callAfter(step2)
+                    )
+                    t2.daemon = True
+                    t2.start()
+
+                AppHelper.callAfter(step1)
+
+            timer = threading.Timer(float(keycycle), cycle)
+            timer.daemon = True
+            timer.start()
+            print(f"HE_DEBUG_FOLLOWUP_KEYCYCLE: at {keycycle}s", flush=True)
 
     def reloadHotkeys(self):
         """Settings saved: re-register with the (possibly changed) bindings."""
@@ -101,6 +155,7 @@ class ExplainController:
         with self._lock:
             self._gen += 1
             gen = self._gen
+            self._session = None  # new hotkey press = new session (M6)
             if self._handle is not None:
                 self._handle.cancel()
             handle = StreamHandle()
@@ -236,11 +291,20 @@ class ExplainController:
     def _stream(self, gen, handle, messages, model=None, max_tokens=None,
                 error_suffix=""):
         reasoning_chars = [0]
+        parts = []  # accumulated content → assistant message for follow-ups
 
         def on_reasoning(chunk):
             # thinking models stream CoT before content; show progress, not the CoT
             reasoning_chars[0] += len(chunk)
             self._onMain(gen, self.panel.showThinking_, reasoning_chars[0])
+
+        def commit():
+            # spec §5.1: the follow-up input appears after success AND after
+            # LLM errors; capture-stage failures never reach _stream.
+            self._onMain(
+                gen, self._commitSession, gen, messages, "".join(parts),
+                model, max_tokens, error_suffix,
+            )
 
         got_content = False
         try:
@@ -249,10 +313,12 @@ class ExplainController:
                 max_tokens=max_tokens,
             ):
                 got_content = True
+                parts.append(chunk)
                 self._onMain(gen, self.panel.appendChunk_, chunk)
         except LLMError as err:
             # str(err) is the whole user-facing story — no tracebacks in the UI
             self._onMain(gen, self.panel.showErrorText_, str(err) + error_suffix)
+            commit()
             if self.health_monitor is not None:
                 # update the menu bar now, not a poll interval later
                 self.health_monitor.poke()
@@ -272,6 +338,76 @@ class ExplainController:
                 gen, self.panel.showErrorText_,
                 "모델이 응답 내용을 내지 않았습니다." + detail + error_suffix,
             )
+        commit()
+
+    # -- follow-up session (M6) ------------------------------------------------
+
+    def _commitSession(self, gen, messages, content, model, max_tokens,
+                       error_suffix):
+        """Main thread (via _onMain). Retain the finished conversation so the
+        panel's input can extend it. The synthetic assistant message on empty
+        content keeps user/assistant alternation valid for chat templates."""
+        assistant = (
+            content if content.strip() else "(이전 요청이 응답 없이 끝났습니다.)"
+        )
+        with self._lock:
+            if gen != self._gen:
+                return
+            self._session = {
+                "gen": gen,
+                "messages": list(messages)
+                + [{"role": "assistant", "content": assistant}],
+                "model": model,
+                "max_tokens": max_tokens,
+                "error_suffix": error_suffix,
+            }
+        self.panel.showFollowUpInput()
+
+    def submitFollowUp(self, text):
+        """Main thread (panel input action / debug hook). Same preemption
+        semantics as a hotkey press — bumps the generation so chunks already
+        queued by a still-streaming follow-up go stale — but keeps the panel
+        transcript and the session. A mid-stream re-submit drops the
+        uncommitted partial answer (and its question) from the LLM context;
+        both stay visible in the transcript — same flavor as preemption."""
+        with self._lock:
+            session = self._session
+            if session is None or session["gen"] != self._gen:
+                return  # preempted/dismissed since the input appeared
+            self._gen += 1
+            gen = self._gen
+            session["gen"] = gen
+            if self._handle is not None:
+                self._handle.cancel()
+            handle = StreamHandle()
+            self._handle = handle
+            messages = self._capTurns(
+                session["messages"] + [{"role": "user", "content": text}]
+            )
+            model = session["model"]
+            max_tokens = session["max_tokens"]
+            error_suffix = session["error_suffix"]
+        print(f"follow-up gen={gen} msgs={len(messages)}", flush=True)
+        self.panel.beginFollowUp_(text)  # we ARE the main thread
+        threading.Thread(
+            target=self._stream, args=(gen, handle, messages),
+            kwargs={
+                "model": model,
+                "max_tokens": max_tokens,
+                "error_suffix": error_suffix,
+            },
+            daemon=True,
+        ).start()
+
+    def _capTurns(self, msgs):
+        """system + at most 2*(followup_max_turns+1) chat messages; drop the
+        oldest user/assistant pair first. Region sessions eventually drop the
+        image message — intended ("oldest dropped"), bounds payload size."""
+        limit = 2 * (int(self.config.get("followup_max_turns")) + 1)
+        head, tail = msgs[:1], msgs[1:]
+        while len(tail) > limit:
+            tail = tail[2:]
+        return head + tail
 
     # -- main-thread marshalling ------------------------------------------------
 
@@ -289,6 +425,7 @@ class ExplainController:
         # stream feeding the now-hidden panel, and drop a pending selection.
         with self._lock:
             self._gen += 1
+            self._session = None
             if self._handle is not None:
                 self._handle.cancel()
                 self._handle = None

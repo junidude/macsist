@@ -68,7 +68,11 @@ DEFAULTS = {
     "capture_max_chars": 4000,
     "panel_width": 420.0,
     "panel_height": 260.0,
+    # follow-up 세션이 시작되면(첫 질문 제출) 패널이 이 높이로 커진다 (M6)
+    "panel_height_expanded": 420.0,
     "panel_cursor_offset": 12.0,
+    # follow-up 대화 깊이: 원래 질문/답 + N개의 추가 질문/답 쌍, 오래된 쌍부터 삭제
+    "followup_max_turns": 5,
 }
 
 
