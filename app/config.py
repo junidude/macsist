@@ -8,6 +8,8 @@ import json
 import shutil
 from pathlib import Path
 
+import i18n
+
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "Macsist"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 # Pre-rename location: through M7 the whole product was called HotkeyExplain;
@@ -44,41 +46,14 @@ DEFAULTS = {
     "active_provider": "로컬 서버",
     "alt_model": "mlx-community/Gemma-4-12B-4bit",
     "agent_model": "mlx-community/Qwen3.6-27B-4bit",
-    "system_prompt_text": (
-        "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트가 한국어가 아니면"
-        "(영어/중국어/일본어 등) 먼저 '번역:'으로 시작하는 자연스러운 한국어 "
-        "번역을 제시하고(긴 글이면 핵심 위주로), 그다음 핵심을 3~5문장으로 "
-        "설명해. 전문용어는 짧게 풀어줘. 군더더기 금지."
-    ),
-    "system_prompt_image": (
-        "너는 한국어로 답하는 간결한 해설가다. 이미지 속 텍스트가 한국어가 "
-        "아니면 먼저 '번역:'으로 시작하는 한국어 번역을 제시한 뒤 설명해. "
-        "이미지의 핵심 내용을 설명하고, 표/코드/도식이면 의미를 풀어줘. 3~6문장."
-    ),
-    "user_prompt_image": "이 이미지를 한국어로 간결하게 설명해줘.",
-    # Detail presets: suffix is appended to the system prompt (text & image),
-    # max_tokens overrides the global one so 자세히 doesn't get cut off.
+    # M11: UI + LLM output language (i18n.LANGUAGES). The prompt keys
+    # (system_prompt_text/image, user_prompt_image, detail_levels) are NOT in
+    # DEFAULTS anymore — get() resolves them from i18n.PROMPT_DEFAULTS for the
+    # current language unless the user customized them (then on-disk wins).
+    "language": "ko",
+    # Detail presets live in i18n per language; the selected key is
+    # language-neutral.
     "explain_detail": "normal",
-    "detail_levels": {
-        "brief": {
-            "label": "간단",
-            "prompt_suffix": " 한두 문장으로 핵심만 말해.",
-            "max_tokens": 256,
-        },
-        "normal": {
-            "label": "보통",
-            "prompt_suffix": "",
-            "max_tokens": 512,
-        },
-        "detailed": {
-            "label": "자세히",
-            "prompt_suffix": (
-                " 단, 이번에는 배경 지식과 맥락, 예시를 포함해 6~10문장으로 "
-                "자세하게 설명해."
-            ),
-            "max_tokens": 1024,
-        },
-    },
     "hotkey_explain_text": "<cmd>+<shift>+e",
     "hotkey_explain_region": "<cmd>+<shift>+r",
     # History 윈도우 토글 (Cmd-Tab 미등장 보완 — Accessory 앱)
@@ -153,12 +128,26 @@ _SUPERSEDED_DEFAULTS = {
     "system_prompt_text": (
         "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트의 핵심을 3~5문장으로 "
         "설명하고, 전문용어는 짧게 풀어줘. 군더더기 금지.",
+        # M3-era 번역-지원 변형 ("긴 글이면 핵심 위주로" 추가 + 3~6→3~5 조정 전)
+        # — M11 언어 전환 검증에서 라이브 config에 박혀 있던 채로 발견됨
+        "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트가 한국어가 아니면"
+        "(영어/중국어/일본어 등) 먼저 '번역:'으로 시작하는 자연스러운 한국어 "
+        "번역을 제시하고, 그다음 핵심을 3~6문장으로 설명해. 전문용어는 짧게 "
+        "풀어줘. 군더더기 금지.",
     ),
     "system_prompt_image": (
         "너는 한국어로 답하는 간결한 해설가다. 이미지의 핵심 내용을 설명하고, "
         "표/코드/도식이면 의미를 풀어줘. 3~6문장.",
     ),
 }
+
+# M11: prompt keys resolved per language at get() time. An on-disk value equal
+# to ANY language's shipped default was never customized — dropped at load
+# (every pre-M11 config has the Korean defaults pinned, since save() writes
+# everything) and scrubbed again at save() so a settings save that writes the
+# fields back verbatim can't re-pin them.
+_LANG_KEYS = ("system_prompt_text", "system_prompt_image",
+              "user_prompt_image", "detail_levels")
 
 
 def _migrate_providers(on_disk):
@@ -199,6 +188,9 @@ class ConfigStore:
             for key, stale_values in _SUPERSEDED_DEFAULTS.items():
                 if on_disk.get(key) in stale_values:
                     del on_disk[key]
+            for key in _LANG_KEYS:
+                if key in on_disk and on_disk[key] in i18n.all_prompt_defaults(key):
+                    del on_disk[key]  # shipped default of some language, not custom
             migrated = _migrate_providers(on_disk)
             self._data = {**DEFAULTS, **on_disk}
             if migrated:
@@ -207,6 +199,9 @@ class ConfigStore:
             self.save()
 
     def save(self):
+        for key in _LANG_KEYS:  # anti-pinning scrub (see _LANG_KEYS comment)
+            if key in self._data and self._data[key] in i18n.all_prompt_defaults(key):
+                del self._data[key]
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(
             json.dumps(self._data, ensure_ascii=False, indent=2) + "\n",
@@ -214,6 +209,10 @@ class ConfigStore:
         )
 
     def get(self, key):
+        if key not in self._data and key in _LANG_KEYS:
+            return i18n.prompt_default(
+                key, str(self._data.get("language", "ko"))
+            )
         return self._data[key]
 
     def set(self, key, value):

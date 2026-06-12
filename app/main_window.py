@@ -82,6 +82,7 @@ from Foundation import (
     NSMutableAttributedString,
 )
 
+from i18n import current_language, t
 from settings_window import SettingsPaneController, pane_min_size
 from ui_kit import FlippedView as _FlippedView, make_pill as _make_pill
 
@@ -113,7 +114,10 @@ FONT_SMALL = 12.0  # captions / session sublines
 FONT_UI = 14.0  # buttons, switch labels, session titles
 _SEARCH_ITEM_ID = "search"
 
-_MODE_LABELS = {"text": "텍스트", "region": "화면", "followup": "추가질문"}
+def _mode_label(mode):
+    key = {"text": "history.mode_text", "region": "history.mode_region",
+           "followup": "history.mode_followup"}.get(mode)
+    return t(key) if key else str(mode)
 
 
 def _short_ts(record):
@@ -136,8 +140,8 @@ def _build_sessions(records):
 def _session_transcript(session):
     parts = []
     for record in session["records"]:
-        parts.append(f"질문:\n{record.get('input', '')}")
-        parts.append(f"응답:\n{record.get('response', '')}")
+        parts.append(f"{t('history.transcript_q')}\n{record.get('input', '')}")
+        parts.append(f"{t('history.transcript_a')}\n{record.get('response', '')}")
     return "\n\n".join(parts)
 
 
@@ -161,9 +165,9 @@ class _SidebarController(NSObject):
     and a shared delegate would make every callback ambiguous. Codex-style
     cells: SF Symbol icon + 15pt label (view-based)."""
 
-    _ITEMS = (
-        ("history", "기록", "clock.arrow.circlepath"),
-        ("settings", "설정", "gearshape"),
+    _ITEMS = (  # (key, i18n label key, SF Symbol)
+        ("history", "history.nav_history", "clock.arrow.circlepath"),
+        ("settings", "history.nav_settings", "gearshape"),
     )
 
     def initWithOwner_(self, owner):
@@ -182,7 +186,8 @@ class _SidebarController(NSObject):
         system source-list capsule re-tiled the row on selection, which made
         the items wobble a few px (user-reported). Selected = accent pill
         with white icon/label; geometry never changes."""
-        _key, label, symbol = self._ITEMS[row]
+        _key, label_key, symbol = self._ITEMS[row]
+        label = t(label_key)
         selected = row == self.table.selectedRow()
         w = float(column.width()) if column is not None else SIDEBAR_WIDTH - 20
         cell = NSTableCellView.alloc().initWithFrame_(NSMakeRect(0, 0, w, 36))
@@ -346,7 +351,7 @@ class MainWindowController(NSObject):
         )
         item.setPreferredWidthForSearchField_(240.0)
         field = item.searchField()
-        field.setPlaceholderString_("검색 (질문/응답)")
+        field.setPlaceholderString_(t("history.search_placeholder"))
         field.setTarget_(self)
         field.setAction_("searchChanged:")
         field.setSendsSearchStringImmediately_(True)
@@ -402,7 +407,21 @@ class MainWindowController(NSObject):
         self.window.setContentSize_((width, total_h))
         print(f"main window chrome_h={chrome_h:.0f}", flush=True)
 
+        # design height of the pane area (below the toolbar) — rebuildContent
+        # (M11 language switch) re-derives the rest from the live contentView
+        self._design_height = height
+        self._buildContent()
+
+        # first open lands screen-centered (it spawned bottom-left otherwise);
+        # the position the user drags it to is kept for later opens
+        self.window.center()
+
+    def _buildContent(self):
         content = self.window.contentView()
+        size = content.frame().size
+        width, total_h = size.width, size.height
+        height = self._design_height
+        content_x = SIDEBAR_INSET + SIDEBAR_WIDTH + 8
         use_glass = self._useGlass()
 
         # Translucent glass sheet body (user feedback round 2: clear was too
@@ -505,16 +524,16 @@ class MainWindowController(NSObject):
         # toggle switches at the island bottom (user feedback: switches, not
         # checkboxes, and they live in the sidebar)
         self.enabled_switch = self._addSwitchTo_y_title_action_(
-            side_host, 14 + 3 * 36, "기록 저장", "toggleEnabled:"
+            side_host, 14 + 3 * 36, t("history.save_master"), "toggleEnabled:"
         )
         self.save_images_switch = self._addSwitchTo_y_title_action_(
-            side_host, 14 + 2 * 36, "이미지 저장", "toggleSaveImages:"
+            side_host, 14 + 2 * 36, t("history.save_images"), "toggleSaveImages:"
         )
         self.save_text_switch = self._addSwitchTo_y_title_action_(
-            side_host, 14 + 1 * 36, "텍스트 저장", "toggleSaveText:"
+            side_host, 14 + 1 * 36, t("history.save_text"), "toggleSaveText:"
         )
         self.floating_switch = self._addSwitchTo_y_title_action_(
-            side_host, 14, "항상 위", "toggleFloating:"
+            side_host, 14, t("history.floating"), "toggleFloating:"
         )
 
         # tabless tab view fills the area right of the island, below the
@@ -543,9 +562,29 @@ class MainWindowController(NSObject):
         item.setView_(settings_view)
         self.tab_view.addTabViewItem_(item)
 
-        # first open lands screen-centered (it spawned bottom-left otherwise);
-        # the position the user drags it to is kept for later opens
-        self.window.center()
+    def rebuildContent(self):
+        """Tear down and rebuild every pane in the current language (M11).
+        Must NOT be called synchronously from an action inside the hierarchy
+        being torn down (the settings Save button) — main.py defers it via
+        AppHelper.callAfter."""
+        if self.window is None:
+            return  # nothing built yet — next _show_ builds fresh
+        current_tab = str(self.tab_view.selectedTabViewItem().identifier()) \
+            if self.tab_view is not None else "history"
+        for sub in list(self.window.contentView().subviews()):
+            sub.removeFromSuperview()
+        self.sidebar._last_row = -1
+        self._last_selected_row = -1
+        self._buildContent()
+        if self.search_field is not None:
+            self.search_field.setPlaceholderString_(
+                t("history.search_placeholder")
+            )
+        self.refreshHistory()  # switch states live here, not in _buildContent
+        self.tab_view.selectTabViewItemWithIdentifier_(current_tab)
+        self.sidebar.selectIdentifier_(current_tab)
+        self._refreshTab_(current_tab)
+        print(f"window content rebuilt lang={current_language()}", flush=True)
 
     def _addSwitchTo_y_title_action_(self, host, y, title, action):
         label = NSTextField.labelWithString_(title)
@@ -568,12 +607,12 @@ class MainWindowController(NSObject):
 
         # bottom-left: actions for the selected session (rounded pill style)
         self.copy_button = _make_pill(
-            "복사", self, "copyResponse:",
+            t("history.copy"), self, "copyResponse:",
             NSMakeRect(PADDING, PADDING, 96, 34),
         )
         container.addSubview_(self.copy_button)
         self.reask_button = _make_pill(
-            "다시 질문", self, "reask:",
+            t("history.reask"), self, "reask:",
             NSMakeRect(PADDING + 104, PADDING, 120, 34),
         )
         container.addSubview_(self.reask_button)
@@ -689,11 +728,13 @@ class MainWindowController(NSObject):
         session = self._filtered[row]
         records = session["records"]
         first = records[0]
-        mode = _MODE_LABELS.get(first.get("mode"), str(first.get("mode")))
+        mode = _mode_label(first.get("mode"))
         title_text = (
-            " ".join(str(first.get("input", "")).split())[:44] or "(빈 질문)"
+            " ".join(str(first.get("input", "")).split())[:44]
+            or t("history.empty_question")
         )
-        sub_text = f"{_short_ts(first)} · {mode} · {len(records)}턴"
+        sub_text = (f"{_short_ts(first)} · {mode} · "
+                    f"{t('history.turns').format(n=len(records))}")
         w = float(column.width()) if column is not None else SESSIONS_WIDTH - 24
         container = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, w, 64))
         card = NSBox.alloc().initWithFrame_(NSMakeRect(2, 3, w - 4, 58))
@@ -714,15 +755,43 @@ class MainWindowController(NSObject):
         title.setFont_(NSFont.systemFontOfSize_weight_(FONT_UI,
                                                        NSFontWeightMedium))
         title.setLineBreakMode_(4)  # truncate tail
-        title.setFrame_(NSMakeRect(12, 31, w - 28, 18))
+        title.setFrame_(NSMakeRect(12, 31, w - 56, 18))
         card.contentView().addSubview_(title)
         sub = NSTextField.labelWithString_(sub_text)
         sub.setFont_(NSFont.systemFontOfSize_(FONT_SMALL))
         sub.setTextColor_(NSColor.secondaryLabelColor())
-        sub.setFrame_(NSMakeRect(12, 9, w - 28, 16))
+        sub.setFrame_(NSMakeRect(12, 9, w - 56, 16))
         card.contentView().addSubview_(sub)
+        # per-card delete (M11) — immediate, no confirmation; tag carries the
+        # FILTERED row index (cells are rebuilt on every reload, never stale)
+        delete = NSButton.alloc().initWithFrame_(NSMakeRect(w - 38, 17, 24, 24))
+        icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+            "xmark.circle.fill", "delete session"
+        )
+        delete.setImage_(icon)
+        delete.setBordered_(False)
+        delete.setButtonType_(0)  # momentary light
+        delete.setContentTintColor_(NSColor.tertiaryLabelColor())
+        delete.setTag_(row)
+        delete.setTarget_(self)
+        delete.setAction_("deleteSession:")
+        card.contentView().addSubview_(delete)
         container.addSubview_(card)
         return container
+
+    def deleteSession_(self, sender):
+        row = int(sender.tag())
+        if not 0 <= row < len(self._filtered):
+            return
+        session = self._filtered[row]
+        self.history.delete_records(session["records"])
+        self._last_selected_row = -1  # stale index after the reload
+        self.refreshHistory()
+        print(
+            f"history: session deleted row={row} "
+            f"records={len(session['records'])}",
+            flush=True,
+        )
 
     def _reloadSessionRows_(self, rows):
         valid = {r for r in rows if 0 <= r < len(self._filtered)}
@@ -760,8 +829,8 @@ class MainWindowController(NSObject):
         y = 4.0
         if session is None:
             label = NSTextField.labelWithString_(
-                "기록이 없습니다." if not self._filtered
-                else "세션을 선택하면 대화가 표시됩니다."
+                t("history.empty") if not self._filtered
+                else t("history.select_session")
             )
             label.setTextColor_(NSColor.secondaryLabelColor())
             label.setFrame_(NSMakeRect(8, y, doc_w - 16, 20))
@@ -771,9 +840,7 @@ class MainWindowController(NSObject):
             cap_font = NSFont.systemFontOfSize_(FONT_SMALL)
             max_text_w = max(120.0, doc_w * 0.72) - 2 * BUBBLE_PAD
             for record in session["records"]:
-                mode = _MODE_LABELS.get(
-                    record.get("mode"), str(record.get("mode"))
-                )
+                mode = _mode_label(record.get("mode"))
                 caption = NSTextField.labelWithString_(
                     f"{_short_ts(record)} · {mode} · "
                     f"{record.get('model', '')}"

@@ -25,15 +25,10 @@ from llm_client import LLMClient, LLMError, StreamHandle
 from region_capture import capture_region, to_data_url
 from text_capture import capture_selected_text
 
-MSG_NO_ACCESSIBILITY = (
-    "손쉬운 사용 권한이 필요합니다 — 방금 연 시스템 설정 창에서 이 앱"
-    "(개발 중엔 터미널)을 허용하세요."
-)
-MSG_NO_SELECTION = "선택된 텍스트가 없습니다."
-MSG_NO_SCREEN_RECORDING = (
-    "화면 기록 권한이 필요합니다 — 방금 연 시스템 설정 창에서 허용한 뒤 "
-    "앱을 재실행하세요."
-)
+from i18n import t
+
+# user-facing messages resolve at call time (module constants would freeze
+# the startup language — M11); t() is a plain dict read, worker-thread safe
 
 # System Settings deep links (M5 permission onboarding)
 URL_PANE_ACCESSIBILITY = (
@@ -43,9 +38,6 @@ URL_PANE_ACCESSIBILITY = (
 URL_PANE_SCREEN_RECORDING = (
     "x-apple.systempreferences:com.apple.preference.security"
     "?Privacy_ScreenCapture"
-)
-MSG_VISION_HINT = (
-    " (이미지 미지원 모델일 수 있습니다 — Settings에서 Vision model을 확인하세요.)"
 )
 
 
@@ -274,14 +266,14 @@ class ExplainController:
             if not AXIsProcessTrusted():
                 self._openSettingsPane(URL_PANE_ACCESSIBILITY)
                 self._onMain(gen, self.panel.showMessageAt_text_, cursor_tl,
-                             MSG_NO_ACCESSIBILITY)
+                             t("errors.no_accessibility"))
                 return
             text = capture_selected_text(self.config)
         if handle.cancelled:
             return
         if not text.strip():
             self._onMain(gen, self.panel.showMessageAt_text_, cursor_tl,
-                         MSG_NO_SELECTION)
+                         t("errors.no_selection"))
             return
         self._onMain(gen, self.panel.beginSessionAt_, cursor_tl)
         suffix, max_tokens, detail = self._detail()
@@ -300,7 +292,7 @@ class ExplainController:
             self._openSettingsPane(URL_PANE_SCREEN_RECORDING)
             loc = CGEventGetLocation(CGEventCreate(None))
             self._onMain(gen, self.panel.showMessageAt_text_, (loc.x, loc.y),
-                         MSG_NO_SCREEN_RECORDING)
+                         t("errors.no_screen_recording"))
             return
         with self._lock:
             prev = self._capture_proc
@@ -348,7 +340,7 @@ class ExplainController:
             gen, handle, messages,
             model=str(self.config.active_provider()["vision_model"]),
             max_tokens=max_tokens,
-            error_suffix=MSG_VISION_HINT,
+            error_suffix=t("errors.vision_hint"),
             mode="region",
             detail=detail,
         )
@@ -425,14 +417,13 @@ class ExplainController:
             self._onMain(gen, self.panel.finishStream)
         else:
             detail = (
-                f" 사고(thinking)에 {reasoning_chars[0]}자를 쓰고 끝났습니다 — "
-                "max_tokens를 늘려보세요."
+                t("errors.no_content_thinking").format(n=reasoning_chars[0])
                 if reasoning_chars[0]
-                else " 서버/모델 설정을 확인하세요."
+                else t("errors.no_content_check")
             )
             self._onMain(
                 gen, self.panel.showErrorText_,
-                "모델이 응답 내용을 내지 않았습니다." + detail + error_suffix,
+                t("errors.no_content") + detail + error_suffix,
             )
         commit()
 
@@ -444,7 +435,8 @@ class ExplainController:
         panel's input can extend it. The synthetic assistant message on empty
         content keeps user/assistant alternation valid for chat templates."""
         assistant = (
-            content if content.strip() else "(이전 요청이 응답 없이 끝났습니다.)"
+            content if content.strip()
+            else t("errors.empty_prev_response")
         )
         with self._lock:
             if gen != self._gen:

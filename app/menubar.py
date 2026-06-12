@@ -13,14 +13,15 @@ from AppKit import (
 )
 from Foundation import NSMakeSize
 
+from i18n import current_language, t
 from main_window import MainWindowController
 
-# server state → (SF Symbol, title fallback, status-line text)
+# server state → (SF Symbol, title fallback, status-line i18n key)
 _SERVER_STATES = {
-    "unknown": ("text.bubble", "M", "서버: 확인 중…"),
-    "ok":      ("text.bubble", "M", "서버: 정상"),
-    "loading": ("ellipsis.bubble", "M…", "서버: 모델 로딩 중…"),
-    "down":    ("exclamationmark.bubble", "M!", "서버: 연결 안 됨"),
+    "unknown": ("text.bubble", "M", "menubar.server_unknown"),
+    "ok":      ("text.bubble", "M", "menubar.server_ok"),
+    "loading": ("ellipsis.bubble", "M…", "menubar.server_loading"),
+    "down":    ("exclamationmark.bubble", "M!", "menubar.server_down"),
 }
 
 _MENUBAR_ICON_PATH = (
@@ -63,23 +64,23 @@ class StatusItemController(NSObject):
         self.server_status_item.setEnabled_(False)
         menu.addItem_(self.server_status_item)
         menu.addItem_(NSMenuItem.separatorItem())
-        history_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "History…", "openHistory:", "h"
+        self.history_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            t("menubar.history"), "openHistory:", "h"
         )
-        history_item.setTarget_(self)
-        menu.addItem_(history_item)
-        settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Settings…", "openSettings:", ","
+        self.history_item.setTarget_(self)
+        menu.addItem_(self.history_item)
+        self.settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            t("menubar.settings"), "openSettings:", ","
         )
-        settings_item.setTarget_(self)
-        menu.addItem_(settings_item)
+        self.settings_item.setTarget_(self)
+        menu.addItem_(self.settings_item)
         menu.addItem_(NSMenuItem.separatorItem())
-        menu.addItem_(
-            NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Quit Macsist", "terminate:", "q"
-            )
+        self.quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            t("menubar.quit"), "terminate:", "q"
         )
+        menu.addItem_(self.quit_item)
         self.status_item.setMenu_(menu)
+        self._server_state = "unknown"
         self.setServerState_("unknown")
 
         import os
@@ -118,12 +119,21 @@ class StatusItemController(NSObject):
             flush=True,
         )
 
+    def relabel(self):
+        """Re-resolve every menu title after a language change (M11)."""
+        self.history_item.setTitle_(t("menubar.history"))
+        self.settings_item.setTitle_(t("menubar.settings"))
+        self.quit_item.setTitle_(t("menubar.quit"))
+        self.setServerState_(self._server_state)
+        print(f"menubar relabeled lang={current_language()}", flush=True)
+
     def setServerState_(self, state):
         """Main thread (health monitor marshals through callAfter)."""
-        symbol, fallback, status_line = _SERVER_STATES.get(
+        self._server_state = state
+        symbol, fallback, status_key = _SERVER_STATES.get(
             state, _SERVER_STATES["unknown"]
         )
-        self.server_status_item.setTitle_(status_line)
+        self.server_status_item.setTitle_(t(status_key))
         # healthy → the custom Macsist icon; loading/down keep the SF-Symbol
         # alert bubbles so the state is visible at a glance (M5 AC)
         icon = None

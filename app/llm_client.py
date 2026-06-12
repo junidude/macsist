@@ -19,6 +19,8 @@ import threading
 
 import httpx
 
+from i18n import t
+
 import keychain
 
 
@@ -129,17 +131,19 @@ class LLMClient:
             raise
         except httpx.ConnectError:
             raise LLMError(
-                f"{pname} 연결 실패 ({base_url}) — 서버/네트워크를 확인하세요."
+                t("errors.connect_failed").format(pname=pname,
+                                                  base_url=base_url)
             ) from None
         except httpx.TimeoutException:
             raise LLMError(
-                f"{pname} 응답 시간 초과 ({base_url}) — 서버 상태를 확인하세요."
+                t("errors.timeout").format(pname=pname, base_url=base_url)
             ) from None
         except httpx.HTTPError as exc:
             if handle.cancelled:
                 return
             raise LLMError(
-                f"{pname} 통신 오류: {exc.__class__.__name__}"
+                t("errors.comm_error").format(pname=pname,
+                                              exc=exc.__class__.__name__)
             ) from None
         except Exception:
             # response.close() from another thread surfaces as various stream
@@ -163,13 +167,15 @@ class LLMClient:
         except ValueError:
             pass
         if response.status_code == 503 and code == "model_loading":
-            return LLMError(f"{pname}: 모델 로딩 중입니다 — 잠시 후 다시 시도하세요.")
+            return LLMError(
+                t("errors.model_loading").format(pname=pname))
         if response.status_code in (401, 403):
             return LLMError(
-                f"{pname} 인증 실패 (HTTP {response.status_code}) — "
-                "API 키를 확인하세요."
+                t("errors.auth_failed").format(pname=pname,
+                                               status=response.status_code)
             )
-        message = f"{pname} 오류 (HTTP {response.status_code})"
+        message = t("errors.http_error").format(
+            pname=pname, status=response.status_code)
         if detail:
             message += f": {str(detail)[:120]}"
         return LLMError(message)
@@ -186,7 +192,7 @@ class LLMClient:
             try:
                 event = json.loads(data)
             except json.JSONDecodeError:
-                raise LLMError("LLM 서버가 잘못된 SSE 형식을 보냈습니다.") from None
+                raise LLMError(t("errors.bad_sse")) from None
             delta = event["choices"][0].get("delta", {})
             content = delta.get("content")
             if content:

@@ -116,8 +116,9 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping); M7 history commit + `resubmit_text` (re-ask) |
 | `settings_window.py` | `SettingsPaneController` — settings controls built into a host view (combos / recorders / detail segments / 고급 flap); window-less since M7 |
 | `main_window.py` | `MainWindowController` — History/Settings window (NSTabView, master-detail history list, search, copy/re-ask, 기록 저장·항상 위 toggles) |
-| `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune |
-| `config.py` | JSON store at `~/Library/Application Support/Macsist/config.json` |
+| `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune/rewrite + `delete_records` (M11) |
+| `i18n.py` | M11 — UI strings (6 languages) + per-language prompt defaults; `t()` / `set_language()`; pure data, stdlib-only |
+| `config.py` | JSON store at `~/Library/Application Support/Macsist/config.json`; prompt keys resolve per `language` (M11, §5.7) |
 | `run.sh` / `deploy.sh` | dev run / launchd deploy |
 
 ### Config reference (all tunables live here)
@@ -406,6 +407,61 @@ plist exists (API-only installs have no server agent). Both deploy.sh scripts
 retry `launchctl bootstrap` up to 5× — bootstrap immediately after bootout
 intermittently fails with I/O error 5.
 
+### 5.7 History deletion + 6-language support (M11, as built)
+
+**History deletion.** Each session card in the History window carries an
+always-visible `xmark.circle.fill` button (right-middle, tertiaryLabel tint);
+click = immediate delete, no confirmation (user decision). The button's tag is
+the *filtered* row index (cells are rebuilt on every reload, so tags can't go
+stale) → `deleteSession_` → `HistoryStore.delete_records(session["records"])`
+→ `refreshHistory()`. The store refactored `_prune` into a shared atomic
+`_rewrite(keep_newest_first)`; `delete_records` Counter-matches
+`(ts, mode, input, response)` tuples against a **fresh** `load()` (ts is
+second-resolution — identical records may coexist; delete exactly the
+requested copies) and the rewrite's orphan sweep removes the session's PNG.
+Log hooks: `history: deleted N records, M remain`,
+`history: session deleted row=…`.
+
+**i18n.** `app/i18n.py` (pure data, stdlib-only — `cli/configure.py` imports
+it): `LANGUAGES` (ko/en/zh/ja/fr/de, native names), `STRINGS[lang][key]`
+(~131 keys: `menubar.* errors.* panel.* history.* settings.*`; ko is
+byte-identical to the pre-M11 literals), `t(key)` with ko fallback,
+`set_language()` (logs `i18n: language=…`), and `PROMPT_DEFAULTS[lang]` —
+per-language `system_prompt_text/image`, `user_prompt_image`,
+`detail_levels` (labels + suffixes localized; key order brief/normal/detailed
+and max_tokens 256/512/1024 identical everywhere; the detailed suffix keeps
+its explicit-override phrasing — the 상세도 feature was reviewed and KEPT, the
+"6–10 sentences" suffix intentionally overrides the base 3–5 rule).
+
+**Config semantics** (`config.py`): new `"language"` key (default ko). The
+four prompt keys left `DEFAULTS`; `get()` resolves them from
+`i18n.PROMPT_DEFAULTS[language]` unless present on disk (customized wins).
+Load-time migration drops an on-disk value equal to ANY language's default
+(every pre-M11 config had the Korean defaults pinned — save() used to write
+everything); `save()` re-scrubs the same way so a Settings save can't re-pin
+them. Trade-off (by design): a genuinely customized prompt survives language
+switches — LLM output language follows the custom prompt until 기본값 복원,
+which now resets to the *current* language's defaults. Gotcha found live: a
+pre-M4 prompt variant was pinned in the real config and blocked the switch —
+historical default variants must be listed in `_SUPERSEDED_DEFAULTS`.
+
+**Live apply.** `main.py` calls `i18n.set_language(config)` before any
+controller builds labels. On Settings save with a language change:
+`set_language` → `menubar.relabel()` (synchronous) →
+`AppHelper.callAfter(main_window.rebuildContent)` — NEVER synchronously: the
+Save button lives inside the hierarchy being torn down. `rebuildContent()`
+strips the contentView, re-runs `_buildContent()` (split out of
+`_buildWindow`), restores tab/search placeholder, re-runs `refreshHistory()`
+(switch states live there). The result panel picks the language up via the
+existing `markDirty()` rebuild. Settings gained a 일반 section with an
+NSPopUpButton of native language names (never translated). Debug hook:
+`HE_DEBUG_SET_LANGUAGE="<sec>:<code>,…"` switches like a Settings save.
+`install.sh` asks the language right after step 0 (installer TUI itself stays
+Korean) → `configure.py set-language <code>`. Log hooks: `menubar relabeled
+lang=…`, `window content rebuilt lang=…`. NSTabView keeps only the selected
+tab's view in the hierarchy — harness assertions on the other tab must use
+direct references (e.g. `mw.copy_button`), not a view walk.
+
 ---
 
 ## 6. Milestones
@@ -546,6 +602,29 @@ memory `verify-ui-without-screenshots`).
   on the user's original config. Debugging notes that became invariants:
   smoke needs `HE_DEBUG_KEEP_PANEL` (user input dismisses the panel →
   cancels the stream) and no dismiss timer shorter than the stream.
+- **M11 — History deletion + 6-language i18n** (§5.7). **DONE (2026-06-13).**
+  *AC:* per-card delete control removes the session (records + region PNG)
+  immediately; language chosen at install / changed in Settings applies
+  without restart to all UI strings AND the LLM output/translation language;
+  상세도 reviewed — kept (suffixes are intentional overrides), localized.
+  *AC verified:* store unit tests (delete mid-session orig+followups, region
+  PNG unlink + referenced-PNG survival, duplicate-record exact-count delete,
+  delete-all → empty, `_prune` regression post-refactor) + config unit tests
+  (fresh config has no prompt keys on disk; pinned Korean defaults dropped;
+  customized prompt survives load+save; `language=en` flips resolved
+  defaults; save-scrub removes default-equal values incl. other languages;
+  pre-M9 superseded variants still dropped) + i18n completeness (6 languages
+  × 131 identical keys, placeholder parity, detail order/tokens identical,
+  ko byte-identity) + window harness (delete click → row gone/disk
+  shrunk/reselect; delete under active search filter; delete-all → empty
+  state; ko build → en `rebuildContent()` flips labels/detail
+  segments/search placeholder; delete button still wired post-rebuild) +
+  live e2e (foreground deployed run: ko explain streamed Korean →
+  `HE_DEBUG_SET_LANGUAGE` 30s:en → `menubar relabeled lang=en` → second
+  explain streamed English with "Translation:" prefix → back to ko) +
+  installer `set-language de` sandbox + invalid-code rejection. Live debugging
+  found a pre-M4 prompt variant pinned in the real config blocking the
+  switch → added to `_SUPERSEDED_DEFAULTS` (gotcha recorded in §5.7).
 
 ---
 

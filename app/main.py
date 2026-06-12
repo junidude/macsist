@@ -9,6 +9,8 @@ import sys
 
 import objc
 
+import i18n
+
 from AppKit import (
     NSAppearance,
     NSAppearanceNameAqua,
@@ -235,6 +237,8 @@ def main():
         print("Accessibility not granted — system prompt + settings pane "
               "shown; will auto-relaunch once granted.", flush=True)
     config = ConfigStore()
+    # M11: resolve the UI/output language BEFORE any controller builds labels
+    i18n.set_language(str(config.get("language")))
     history = HistoryStore(config)
     _controller = StatusItemController.alloc().initWithConfig_history_(
         config, history
@@ -250,6 +254,14 @@ def main():
     def _settings_saved():
         _explain.reloadHotkeys()
         panel.markDirty()  # panel size/font/glass apply on the next session
+        new_lang = str(config.get("language"))
+        if new_lang != i18n.current_language():
+            # M11 live language switch: menubar relabels synchronously; the
+            # window rebuild is deferred — the Save action lives inside the
+            # very hierarchy rebuildContent tears down.
+            i18n.set_language(new_lang)
+            _controller.relabel()
+            AppHelper.callAfter(main_window.rebuildContent)
 
     main_window.settings.on_saved = _settings_saved
     main_window.settings.on_record_changed = _explain.pauseHotkeys_
@@ -265,6 +277,25 @@ def main():
     dist_center.addObserver_selector_name_object_(
         _remote_relay, "remoteShowHistory:", "com.macsist.showHistory", None
     )
+    # M11 hook: switch the language like a Settings save would, at given
+    # times — live-switch verification. Format: "<sec>:<code>[,<sec>:<code>…]"
+    switches = os.environ.get("HE_DEBUG_SET_LANGUAGE")
+    if switches:
+        def switch_language(code):
+            config.set("language", code)
+            config.save()
+            _settings_saved()
+
+        import threading as _threading
+        for item in switches.split(","):
+            delay, _, code = item.partition(":")
+            timer = _threading.Timer(
+                float(delay),
+                lambda code=code: AppHelper.callAfter(switch_language, code),
+            )
+            timer.daemon = True
+            timer.start()
+        print(f"HE_DEBUG_SET_LANGUAGE: {switches}", flush=True)
     audit = os.environ.get("HE_DEBUG_UI_AUDIT")
     if audit:
         _ui_auditor = _UIAuditor.alloc().init()

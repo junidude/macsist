@@ -72,11 +72,12 @@ try:
 except ImportError:
     _CORNER_CONTINUOUS = "continuous"
 
+from i18n import t
+
 _ESC_KEYCODE = 53
 _PADDING = 14.0  # Spotlight-like airy inset (M8 polish)
 _INPUT_HEIGHT = 30.0
 _INPUT_GAP = 6.0
-INPUT_PLACEHOLDER = "이어서 질문…"
 
 
 class _NonActivatingPanel(NSPanel):
@@ -169,7 +170,8 @@ class ResultPanelController(NSObject):
         spam — this fires per reasoning token). First content chunk replaces it."""
         if self._placeholder:
             self._replaceTail_attrs_(
-                f"생각 중… ({char_count}자)", self._message_attrs
+                t("panel.thinking").format(n=char_count),
+                self._message_attrs
             )
 
     def showMessageAt_text_(self, cursor_tl, message):
@@ -346,7 +348,7 @@ class ResultPanelController(NSObject):
         field = _FollowUpField.alloc().initWithFrame_(
             NSMakeRect(_PADDING, _PADDING, width - 2 * _PADDING, _INPUT_HEIGHT)
         )
-        field.setPlaceholderString_(INPUT_PLACEHOLDER)
+        field.setPlaceholderString_(t("panel.followup_placeholder"))
         field.setFont_(
             NSFont.systemFontOfSize_(float(self.config.get("panel_font_size")))
         )

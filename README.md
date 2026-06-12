@@ -12,13 +12,19 @@ LLM (MLX). No cloud, no Electron.
   local vision model.
 - **Follow-up questions**: after an answer, type "이어서 질문…" directly in the
   panel — same conversation, same model (vision sessions keep the image).
+- **Languages** (M11): 한국어/English/简体中文/日本語/Français/Deutsch — chosen
+  during install, changeable in Settings (일반 → 언어), applies live to the UI
+  and to the answer/translation language. Non-matching input gets a
+  "번역:"/"Translation:"-style translation line first.
 - **History** (menu-bar icon → History…, or `⌘⇧H` from anywhere): every
   completed explain is saved to
   `~/Library/Application Support/Macsist/history.jsonl`; region captures keep
   their screenshot in `history_images/` so they can be re-asked too. The
   window lists past Q/A newest-first with search; select a row for the full
   text, then 복사 or 다시 질문 (re-runs it with the current model — region
-  rows re-send the saved screenshot). Saving is controlled by "기록 저장
+  rows re-send the saved screenshot), or delete a session with the ✕ on its
+  card (immediate — removes its records and saved screenshot, M11). Saving is
+  controlled by "기록 저장
   (전체)" with per-mode sub-toggles "이미지 저장" / "텍스트 저장"; "항상 위"
   keeps the window floating. While the window is open the app appears in
   Cmd-Tab (shown as "Python" until it ships as a bundle in M10).
@@ -81,6 +87,8 @@ Installed by `install.sh` as a symlink (`/usr/local/bin/macsist` or
   host a local LLM; keys in the macOS Keychain)
 - **M10** ✅ one-command onboarding installer + `macsist` CLI
   (`status / logs / doctor / restart / update`)
+- **M11** ✅ per-card history deletion + 6-language support (UI + answer
+  language, restart-free switching)
 
 ---
 

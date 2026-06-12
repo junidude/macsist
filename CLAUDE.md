@@ -8,10 +8,12 @@
 Native macOS **menu-bar app** — product name **Macsist**; "HotkeyExplain" is
 its hotkey-explain feature (legacy codename — `HE_DEBUG_*` hooks keep the
 initialism; launchd labels/dirs are `com.macsist.*`, `…/Macsist/`). Global hotkey →
-captures **selected text** or a **screen region** → streams a **concise Korean
-explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
+captures **selected text** or a **screen region** → streams a **concise
+explanation in the configured language** (ko/en/zh/ja/fr/de — M11; UI strings
++ prompts via `app/i18n.py`, prompt keys resolve per `language` in config)
+from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default, or any external OpenAI-compatible provider — M9) into a floating
-panel near the cursor. **M0–M10 are shipped and running — v2 complete**
+panel near the cursor. **M0–M11 are shipped and running — v2 complete**
 (M7: JSONL history +
 History/Settings main window; M8 + M8.1: Liquid Glass UI — `NSGlassEffectView`
 panel (`glass_enabled`/`glass_style` in config), 150ms fade, auto-height,
@@ -23,7 +25,8 @@ provider picker in Settings 연결, restart-free switching, provider-named
 errors; M10: `install.sh` Korean-TUI onboarding installer — RAM-tiered model
 recommendation with HF-verified catalog, server models in `models.env` — and
 the `macsist` CLI: status/start/stop/restart/logs/settings/history/doctor/
-update; as-built notes in `docs/SPEC.md` §5.5–5.6).
+update; M11: per-card history deletion + 6-language i18n with restart-free
+switching — as-built notes in `docs/SPEC.md` §5.5–5.7).
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit

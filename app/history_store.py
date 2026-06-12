@@ -19,6 +19,7 @@ the main thread, so no lock is needed. Do not call from worker threads.
 import json
 import os
 import uuid
+from collections import Counter
 from datetime import datetime
 
 from config import CONFIG_DIR
@@ -74,9 +75,11 @@ class HistoryStore:
         if self.on_appended is not None:
             self.on_appended()
 
-    def _prune(self, max_items):
-        records = self.load()  # newest first, bad lines already dropped
-        keep = list(reversed(records[:max_items]))  # back to oldest-first
+    def _rewrite(self, keep_newest_first):
+        """Atomically rewrite the JSONL to exactly these records (given
+        newest-first, stored oldest-first), then delete image files no
+        surviving record references."""
+        keep = list(reversed(keep_newest_first))  # back to oldest-first
         tmp = self.path.with_suffix(".jsonl.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             for record in keep:
@@ -90,7 +93,33 @@ class HistoryStore:
                     file.unlink()
         except OSError:
             pass
+
+    def _prune(self, max_items):
+        self._rewrite(self.load()[:max_items])
         print(f"history pruned to {self._count} records", flush=True)
+
+    def delete_records(self, records):
+        """Delete these records (a session: original + its followups) from the
+        file. Records have no id and `ts` is second-resolution, so identical
+        records can legitimately coexist — count matches and delete exactly as
+        many copies as requested, against a FRESH load (the window's in-memory
+        copy may predate a concurrent append). Main-thread-only like the rest
+        of the store."""
+        key = lambda r: (r.get("ts"), r.get("mode"),  # noqa: E731
+                         r.get("input"), r.get("response"))
+        doomed = Counter(key(r) for r in records)
+        keep = []
+        for record in self.load():
+            k = key(record)
+            if doomed.get(k):
+                doomed[k] -= 1
+                continue
+            keep.append(record)
+        deleted = len(records) - sum(doomed.values())
+        self._rewrite(keep)
+        print(f"history: deleted {deleted} records, {self._count} remain",
+              flush=True)
+        return deleted
 
     def image_path(self, record):
         """Path of the record's saved capture, or None (no image / deleted)."""

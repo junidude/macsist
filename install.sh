@@ -71,6 +71,24 @@ ok "$CHIP / RAM ${RAM_GB}GB / 디스크 여유 ${DISK_GB}GB / macOS $(sw_vers -p
 [[ -f "$APP_DIR/main.py" ]] && warn "기존 설치가 감지되었습니다 — 재실행은 안전합니다."
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 언어 선택 (M11) — 앱 UI + 답변 언어. 인스톨러 TUI 자체는 한국어 유지.
+# ─────────────────────────────────────────────────────────────────────────────
+say "언어 선택 (Language)"
+echo "  1) 한국어   2) English   3) 简体中文   4) 日本語   5) Français   6) Deutsch"
+ask LANG_CHOICE "선택 (Language)" 1
+case "$LANG_CHOICE" in
+    1) LANG_CODE=ko ;;
+    2) LANG_CODE=en ;;
+    3) LANG_CODE=zh ;;
+    4) LANG_CODE=ja ;;
+    5) LANG_CODE=fr ;;
+    6) LANG_CODE=de ;;
+    *) die "1~6 중에서 선택하세요." ;;
+esac
+"$(cfgpy)" "$CONFIGURE" set-language "$LANG_CODE" >/dev/null || die "언어 설정 실패"
+ok "언어: $LANG_CODE"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 1. 모델 카탈로그 + 추천  (Qwen 3.6 / Gemma 4 멀티모달, 성능순)
 #    형식: id|크기GB|최소RAM  (단일 멀티모달, vlm-only 모드로 구동)
 # ─────────────────────────────────────────────────────────────────────────────

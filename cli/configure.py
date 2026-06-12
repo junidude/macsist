@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
+import i18n  # noqa: E402
 import keychain  # noqa: E402
 from config import ConfigStore  # noqa: E402
 
@@ -92,6 +93,7 @@ def cmd_status(args):
             "key_present": key_present,
         },
         "providers": [p.get("name") for p in store.get("providers") or []],
+        "language": store.get("language"),
         "hotkeys": {
             "explain_text": store.get("hotkey_explain_text"),
             "explain_region": store.get("hotkey_explain_region"),
@@ -158,6 +160,13 @@ def cmd_set_api_provider(args):
                   "key_account": entry.get("api_key_env_or_value", "")})
 
 
+def cmd_set_language(args):
+    store = ConfigStore()
+    store.set("language", args.code)
+    store.save()
+    return _emit({"saved": True, "language": args.code})
+
+
 def cmd_probe(args):
     store = ConfigStore()
     provider = store.active_provider()
@@ -207,6 +216,9 @@ def main():
     p.add_argument("--vision-model")
     p.add_argument("--key-stdin", action="store_true")
 
+    p = sub.add_parser("set-language")
+    p.add_argument("code", choices=list(i18n.LANGUAGES))
+
     sub.add_parser("probe")
 
     args = parser.parse_args()
@@ -214,6 +226,7 @@ def main():
         "status": cmd_status,
         "set-local-provider": cmd_set_local_provider,
         "set-api-provider": cmd_set_api_provider,
+        "set-language": cmd_set_language,
         "probe": cmd_probe,
     }[args.cmd]
     sys.exit(handler(args))

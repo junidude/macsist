@@ -53,7 +53,9 @@ from AppKit import (
 from Foundation import NSMakeSize
 from PyObjCTools import AppHelper
 
+import i18n
 import keychain
+from i18n import t
 from config import DEFAULTS
 from hotkeys import format_binding
 from ui_kit import FlippedView, make_pill, make_round_field
@@ -65,29 +67,34 @@ FONT_FIELD = 14.0  # input text
 _ESC_KEYCODE = 53
 _MOD_SYMBOLS = {"<cmd>": "⌘", "<ctrl>": "⌃", "<alt>": "⌥", "<shift>": "⇧"}
 
-MODEL_FIELDS = [
-    ("explain_model", "설명 모델", "텍스트 설명에 사용"),
-    ("vision_model", "비전 모델", "화면 캡처 설명에 사용 (멀티모달 모델 필요)"),
+MODEL_FIELDS = [  # (config key, i18n title key, i18n desc key)
+    ("explain_model", "settings.model_explain_title",
+     "settings.model_explain_desc"),
+    ("vision_model", "settings.model_vision_title",
+     "settings.model_vision_desc"),
 ]
 # M9: template for 추가 — OpenRouter is the documented example endpoint
 NEW_PROVIDER = {
-    "name": "새 프로바이더",
+    "name": "",  # filled with t("settings.new_provider_name") at add time
     "base_url": "https://openrouter.ai/api",
     "api_key_env_or_value": "",
     "explain_model": "",
     "vision_model": "",
     "is_local": False,
 }
-HOTKEY_FIELDS = [
-    ("hotkey_explain_text", "텍스트 설명", "선택한 텍스트를 설명"),
-    ("hotkey_explain_region", "영역 설명", "화면 영역을 캡처해 설명"),
-    ("hotkey_open_history", "기록 창", "History/Settings 창 토글"),
+HOTKEY_FIELDS = [  # (config key, i18n title key, i18n desc key)
+    ("hotkey_explain_text", "settings.hk_text_title", "settings.hk_text_desc"),
+    ("hotkey_explain_region", "settings.hk_region_title",
+     "settings.hk_region_desc"),
+    ("hotkey_open_history", "settings.hk_history_title",
+     "settings.hk_history_desc"),
 ]
-ADV_PROMPT_FIELDS = [
-    ("system_prompt_text", "System prompt (텍스트)"),
-    ("system_prompt_image", "System prompt (이미지)"),
+ADV_PROMPT_FIELDS = [  # (config key, i18n label key)
+    ("system_prompt_text", "settings.prompt_text_label"),
+    ("system_prompt_image", "settings.prompt_image_label"),
 ]
-_GLASS_STYLE_ITEMS = [("regular", "Frosted (기본)"), ("clear", "투명 (Clear)")]
+_GLASS_STYLE_ITEMS = [("regular", "settings.glass_regular"),
+                      ("clear", "settings.glass_clear")]
 
 # layout
 INSET_X = 24.0  # sections inset from the pane edges
@@ -152,6 +159,9 @@ class SettingsPaneController(NSObject):
         self.hotkey_buttons = {}  # config key -> pill NSButton
         self.detail_control = None  # NSSegmentedControl
         self._detail_keys = []  # segment index -> detail_levels key
+        # M11 language picker — popup shows native names, never translated
+        self.language_popup = None
+        self._language_codes = list(i18n.LANGUAGES)
         self.status_label = None
         # 모양 (M8): result-panel sizing + glass style
         self.panel_font_field = None
@@ -190,6 +200,11 @@ class SettingsPaneController(NSObject):
         for key, button in self.hotkey_buttons.items():
             self._hotkey_bindings[key] = str(self.config.get(key))
             button.setTitle_(_pretty_binding(self._hotkey_bindings[key]))
+        lang = str(self.config.get("language"))
+        self.language_popup.selectItemAtIndex_(
+            self._language_codes.index(lang)
+            if lang in self._language_codes else 0
+        )
         current = str(self.config.get("explain_detail"))
         if current in self._detail_keys:
             self.detail_control.setSelectedSegment_(self._detail_keys.index(current))
@@ -203,7 +218,7 @@ class SettingsPaneController(NSObject):
             f"{float(self.config.get('panel_height')):g}"
         )
         style = str(self.config.get("glass_style"))
-        keys = [k for k, _label in _GLASS_STYLE_ITEMS]
+        keys = [k for k, _label_key in _GLASS_STYLE_ITEMS]
         self.glass_style_popup.selectItemAtIndex_(
             keys.index(style) if style in keys else 0
         )
@@ -268,13 +283,13 @@ class SettingsPaneController(NSObject):
         entry = self._providers[self._selected]
         ref = str(entry.get("api_key_env_or_value", "")).strip()
         if entry.get("_pending_key"):
-            text = "새 키 입력됨 — 저장 시 Keychain에 보관"
+            text = t("settings.key_new")
         elif ref.startswith("env:"):
-            text = f"환경변수 참조 ({ref})"
+            text = t("settings.key_env").format(ref=ref)
         elif ref:
-            text = "키 저장됨 (Keychain) — 비워 두면 유지"
+            text = t("settings.key_stored")
         else:
-            text = "키 없음 — 입력하면 Keychain에 저장 (로컬 서버는 불필요)"
+            text = t("settings.key_none")
         self.key_desc_label.setStringValue_(text)
 
     def providerChanged_(self, sender):
@@ -289,6 +304,7 @@ class SettingsPaneController(NSObject):
     def addProvider_(self, sender):
         self._stashFields()
         entry = dict(NEW_PROVIDER)
+        entry["name"] = t("settings.new_provider_name")
         names = {str(p.get("name", "")) for p in self._providers}
         if entry["name"] in names:
             n = 2
@@ -299,11 +315,11 @@ class SettingsPaneController(NSObject):
         self._selected = len(self._providers) - 1
         self._rebuildProviderPopup()
         self._loadProviderFields()
-        self.status_label.setStringValue_("프로바이더 추가됨 — 저장 시 적용")
+        self.status_label.setStringValue_(t("settings.provider_added"))
 
     def deleteProvider_(self, sender):
         if len(self._providers) <= 1:
-            self.status_label.setStringValue_("⚠ 마지막 프로바이더는 삭제할 수 없습니다.")
+            self.status_label.setStringValue_(t("settings.provider_last"))
             return
         entry = self._providers.pop(self._selected)
         ref = str(entry.get("api_key_env_or_value", "")).strip()
@@ -313,7 +329,8 @@ class SettingsPaneController(NSObject):
         self._rebuildProviderPopup()
         self._loadProviderFields()
         self.status_label.setStringValue_(
-            f"'{entry.get('name', '')}' 삭제 예약 — 저장 시 적용"
+            t("settings.provider_delete_staged").format(
+                name=entry.get("name", ""))
         )
 
     def fetchModels_(self, sender):
@@ -433,12 +450,27 @@ class SettingsPaneController(NSObject):
                 holder["field"] = field
             return holder, (INPUT_ROW_H, build)
 
+        # ---- 일반 (M11: language) ----
+        section(t("settings.section_general"))
+
+        def build_language(inner, row_y):
+            titled(inner, row_y, t("settings.language_title"),
+                   t("settings.language_desc"))
+            popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                control_frame(row_y, 170), False
+            )
+            for name in i18n.LANGUAGES.values():
+                popup.addItemWithTitle_(name)
+            inner.addSubview_(popup)
+            self.language_popup = popup
+        card([(ROW_H, build_language)])
+
         # ---- 연결 (M9: provider picker + per-provider fields) ----
-        section("연결")
+        section(t("settings.section_connection"))
 
         def build_picker(inner, row_y):
-            titled(inner, row_y, "활성 프로바이더",
-                   "요청에 사용할 엔드포인트 — 아래 필드로 편집, 저장 시 적용")
+            titled(inner, row_y, t("settings.active_provider_title"),
+                   t("settings.active_provider_desc"))
             popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
                 control_frame(row_y, 260), False
             )
@@ -448,22 +480,23 @@ class SettingsPaneController(NSObject):
             self.provider_popup = popup
 
         def build_manage(inner, row_y):
-            titled(inner, row_y, "프로바이더 관리",
-                   "추가는 OpenRouter 템플릿으로 — 삭제·추가 모두 저장 시 적용")
+            titled(inner, row_y, t("settings.manage_title"),
+                   t("settings.manage_desc"))
             inner.addSubview_(make_pill(
-                "추가", self, "addProvider:",
+                t("settings.add"), self, "addProvider:",
                 NSMakeRect(ctrl_x - 188, row_y + (ROW_H - 30) / 2, 90, 30),
             ))
             inner.addSubview_(make_pill(
-                "삭제", self, "deleteProvider:",
+                t("settings.delete"), self, "deleteProvider:",
                 NSMakeRect(ctrl_x - 90, row_y + (ROW_H - 30) / 2, 90, 30),
             ))
         card([(ROW_H, build_picker), (ROW_H, build_manage)])
 
-        name_holder, name_row = input_row("이름", "프로바이더 표시 이름")
+        name_holder, name_row = input_row(t("settings.name_label"),
+                                          t("settings.name_placeholder"))
         url_holder, url_row = input_row(
-            "서버 주소",
-            "OpenAI 호환 엔드포인트 (예: https://openrouter.ai/api)",
+            t("settings.url_label"),
+            t("settings.url_placeholder"),
         )
 
         key_holder = {}
@@ -471,7 +504,8 @@ class SettingsPaneController(NSObject):
         def build_key(inner, row_y):
             # input_row twin, but secure + a handle on the desc label so it
             # can double as the Keychain status line
-            self.key_desc_label = titled(inner, row_y, "API 키", " ")
+            self.key_desc_label = titled(inner, row_y,
+                                         t("settings.api_key_title"), " ")
             box, field = make_round_field(
                 NSMakeRect(ROW_PAD_X, row_y + 58,
                            card_w - 2 * ROW_PAD_X, 34),
@@ -481,8 +515,8 @@ class SettingsPaneController(NSObject):
             key_holder["field"] = field
 
         def build_local(inner, row_y):
-            titled(inner, row_y, "로컬 서버",
-                   "켜면 /health 폴링 + chat_template_kwargs 전송")
+            titled(inner, row_y, t("settings.local_title"),
+                   t("settings.local_desc"))
             switch = NSSwitch.alloc().initWithFrame_(
                 control_frame(row_y, 42, 25)
             )
@@ -490,16 +524,18 @@ class SettingsPaneController(NSObject):
             self.local_switch = switch
 
         model_holders, model_rows = [], []
-        for key, title, desc in MODEL_FIELDS:
-            holder, row = field_row(title, desc, field_class=NSComboBox)
+        for key, title_key, desc_key in MODEL_FIELDS:
+            holder, row = field_row(t(title_key), t(desc_key),
+                                    field_class=NSComboBox)
             model_holders.append((key, holder))
             model_rows.append(row)
 
         def build_fetch(inner, row_y):
-            titled(inner, row_y, "모델 목록",
-                   "서버 주소에서 /v1/models 조회해 자동완성 갱신")
+            titled(inner, row_y, t("settings.models_title"),
+                   t("settings.models_desc"))
             inner.addSubview_(make_pill(
-                "새로고침", self, "fetchModels:", control_frame(row_y, 110, 30)
+                t("settings.refresh"), self, "fetchModels:",
+                control_frame(row_y, 110, 30)
             ))
         card([name_row, url_row, (INPUT_ROW_H, build_key),
               (ROW_H, build_local)] + model_rows + [(ROW_H, build_fetch)])
@@ -511,13 +547,14 @@ class SettingsPaneController(NSObject):
             self.model_fields[key] = holder["field"]
 
         # ---- 응답 ----
-        section("응답")
+        section(t("settings.section_response"))
         levels = self.config.get("detail_levels")
         self._detail_keys = list(levels.keys())
         seg_labels = [str(levels[k].get("label", k)) for k in self._detail_keys]
 
         def build_detail(inner, row_y):
-            titled(inner, row_y, "상세도", "답변 길이/깊이 프리셋")
+            titled(inner, row_y, t("settings.detail_title"),
+                   t("settings.detail_desc"))
             control = NSSegmentedControl.segmentedControlWithLabels_trackingMode_target_action_(
                 seg_labels, NSSegmentSwitchTrackingSelectOne, None, None
             )
@@ -527,11 +564,12 @@ class SettingsPaneController(NSObject):
         card([(ROW_H, build_detail)])
 
         # ---- 단축키 ----
-        section("단축키")
+        section(t("settings.section_hotkeys"))
         hotkey_rows = []
-        for key, title, desc in HOTKEY_FIELDS:
-            def build_hotkey(inner, row_y, key=key, title=title, desc=desc):
-                titled(inner, row_y, title, desc)
+        for key, title_key, desc_key in HOTKEY_FIELDS:
+            def build_hotkey(inner, row_y, key=key, title_key=title_key,
+                             desc_key=desc_key):
+                titled(inner, row_y, t(title_key), t(desc_key))
                 button = make_pill("", self, "recordHotkey:",
                                    control_frame(row_y, 190, 30))
                 inner.addSubview_(button)
@@ -540,30 +578,30 @@ class SettingsPaneController(NSObject):
         card(hotkey_rows)
 
         # ---- 모양 (M8: panel sizing + glass) ----
-        section("모양")
+        section(t("settings.section_appearance"))
 
         def size_row(title, desc):
             holder, row = field_row(title, desc, w=CTRL_W_NARROW)
             return holder, row
 
         font_holder, font_row = size_row(
-            "패널 폰트 크기", "결과 패널 본문/입력 글자 크기 (pt)"
+            t("settings.font_title"), t("settings.font_desc")
         )
         width_holder, width_row = size_row(
-            "패널 너비", "결과 패널 가로 크기 (pt)"
+            t("settings.width_title"), t("settings.width_desc")
         )
         height_holder, height_row = size_row(
-            "패널 최대 높이", "내용에 따라 이 높이까지 자라고, 그 뒤로는 스크롤"
+            t("settings.height_title"), t("settings.height_desc")
         )
 
         def build_glass(inner, row_y):
-            titled(inner, row_y, "Glass 스타일",
-                   "패널/창 유리 효과 — Frosted가 가독성이 좋습니다")
+            titled(inner, row_y, t("settings.glass_title"),
+                   t("settings.glass_desc"))
             popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
                 control_frame(row_y, 170), False
             )
-            for _key, label in _GLASS_STYLE_ITEMS:
-                popup.addItemWithTitle_(label)
+            for _key, label_key in _GLASS_STYLE_ITEMS:
+                popup.addItemWithTitle_(t(label_key))
             inner.addSubview_(popup)
             self.glass_style_popup = popup
         card([font_row, width_row, height_row, (ROW_H, build_glass)])
@@ -572,11 +610,11 @@ class SettingsPaneController(NSObject):
         self.panel_height_field = height_holder["field"]
 
         # ---- 고급 ----
-        section("고급")
+        section(t("settings.section_advanced"))
         adv_rows = []
-        for key, title in ADV_PROMPT_FIELDS:
-            def build_prompt(inner, row_y, key=key, title=title):
-                titled(inner, row_y, title, None)
+        for key, label_key in ADV_PROMPT_FIELDS:
+            def build_prompt(inner, row_y, key=key, label_key=label_key):
+                titled(inner, row_y, t(label_key), None)
                 frame = NSMakeRect(
                     ROW_PAD_X, row_y + 40, card_w - 2 * ROW_PAD_X,
                     PROMPT_ROW_H - 52,
@@ -609,31 +647,32 @@ class SettingsPaneController(NSObject):
             adv_rows.append((PROMPT_ROW_H, build_prompt))
 
         img_holder, img_row = input_row(
-            "이미지 질문 프롬프트", "화면 캡처와 함께 보내는 사용자 메시지"
+            t("settings.img_prompt_title"), t("settings.img_prompt_desc")
         )
         adv_rows.append(img_row)
         temp_holder, temp_row = field_row(
-            "Temperature", "샘플링 온도 (0~2)", w=CTRL_W_NARROW
+            t("settings.temp_title"), t("settings.temp_desc"), w=CTRL_W_NARROW
         )
         adv_rows.append(temp_row)
         tokens_holder, tokens_row = field_row(
-            "Max tokens", "응답 길이 상한 (상세도 프리셋이 우선)",
+            t("settings.maxtok_title"), t("settings.maxtok_desc"),
             w=CTRL_W_NARROW,
         )
         adv_rows.append(tokens_row)
         followup_holder, followup_row = field_row(
-            "Follow-up 턴 수", "추가 질문 대화 깊이 (오래된 쌍부터 삭제)",
+            t("settings.followup_title"), t("settings.followup_desc"),
             w=CTRL_W_NARROW,
         )
         adv_rows.append(followup_row)
         kwargs_holder, kwargs_row = input_row(
-            "Template kwargs", 'JSON — 로컬 서버 전용 (예: {"enable_thinking": false})'
+            t("settings.kwargs_title"), t("settings.kwargs_desc")
         )
         adv_rows.append(kwargs_row)
 
         def build_reset(inner, row_y):
-            titled(inner, row_y, "기본값 복원", "고급 필드를 출하 기본값으로 (저장 시 적용)")
-            button = make_pill("복원", self, "resetAdvanced:",
+            titled(inner, row_y, t("settings.reset_title"),
+                   t("settings.reset_desc"))
+            button = make_pill(t("settings.reset_btn"), self, "resetAdvanced:",
                                control_frame(row_y, 90, 30))
             inner.addSubview_(button)
         adv_rows.append((ROW_H, build_reset))
@@ -655,17 +694,18 @@ class SettingsPaneController(NSObject):
         )
         container.addSubview_(self.status_label)
         save_button = make_pill(
-            "저장", self, "save:",
+            t("settings.save_btn"), self, "save:",
             NSMakeRect(width - INSET_X - 96, (BOTTOM_BAR_H - 32) / 2, 96, 32),
         )
         container.addSubview_(save_button)
 
     def resetAdvanced_(self, sender):
         """Reset the advanced FIELDS to the shipped defaults — applied on Save."""
+        lang = str(self.config.get("language"))
         for key, text_view in self.prompt_views.items():
-            text_view.setString_(str(DEFAULTS[key]))
+            text_view.setString_(str(i18n.prompt_default(key, lang)))
         self.user_prompt_image_field.setStringValue_(
-            str(DEFAULTS["user_prompt_image"])
+            str(i18n.prompt_default("user_prompt_image", lang))
         )
         self.temperature_field.setStringValue_(str(DEFAULTS["temperature"]))
         self.max_tokens_field.setStringValue_(str(DEFAULTS["max_tokens"]))
@@ -673,7 +713,7 @@ class SettingsPaneController(NSObject):
         self.template_kwargs_field.setStringValue_(
             json.dumps(DEFAULTS["chat_template_kwargs"], ensure_ascii=False)
         )
-        self.status_label.setStringValue_("기본값 복원됨 — 저장으로 적용")
+        self.status_label.setStringValue_(t("settings.reset_done"))
 
     # -- hotkey recorder ------------------------------------------------------
     # Click a hotkey button → the next key combo becomes that binding. Captured
@@ -694,7 +734,7 @@ class SettingsPaneController(NSObject):
         if was_recording == target:
             return  # second click on the same button = cancel only
         self._record_target = target
-        self.hotkey_buttons[target].setTitle_("단축키를 누르세요… (Esc 취소)")
+        self.hotkey_buttons[target].setTitle_(t("settings.record_prompt"))
         self.status_label.setStringValue_("")
         if self.on_record_changed is not None:
             self.on_record_changed(True)
@@ -716,7 +756,7 @@ class SettingsPaneController(NSObject):
         )
         if binding is None or "+" not in binding:
             # non-ANSI key, or no modifier at all — keep recording
-            self.status_label.setStringValue_("⌘/⌥/⌃/⇧ 와 함께 눌러주세요")
+            self.status_label.setStringValue_(t("settings.record_need_mod"))
             return None
         self._endRecording_(binding)
         print("hotkey recorded:", binding, flush=True)
@@ -791,17 +831,17 @@ class SettingsPaneController(NSObject):
         try:
             font_size = float(str(self.panel_font_field.stringValue()).strip())
         except ValueError:
-            return None, "패널 폰트 크기는 숫자여야 합니다."
+            return None, t("settings.v_font_num")
         if not 8 <= font_size <= 40:
-            return None, "패널 폰트 크기는 8~40 사이여야 합니다."
+            return None, t("settings.v_font_range")
         values["panel_font_size"] = font_size
         try:
             panel_w = float(str(self.panel_width_field.stringValue()).strip())
             panel_h = float(str(self.panel_height_field.stringValue()).strip())
         except ValueError:
-            return None, "패널 크기는 숫자여야 합니다."
+            return None, t("settings.v_size_num")
         if panel_w < 200 or panel_h < 150:
-            return None, "패널 크기가 너무 작습니다 (너비 200+, 높이 150+)."
+            return None, t("settings.v_size_small")
         values["panel_width"] = panel_w
         values["panel_height"] = panel_h
         idx = int(self.glass_style_popup.indexOfSelectedItem())
@@ -816,30 +856,30 @@ class SettingsPaneController(NSObject):
         for key, text_view in self.prompt_views.items():
             text = str(text_view.string()).strip()
             if not text:
-                return None, "System prompt가 비어 있습니다."
+                return None, t("settings.v_prompt_empty")
             values[key] = text
         user_prompt = str(self.user_prompt_image_field.stringValue()).strip()
         if not user_prompt:
-            return None, "이미지 질문 프롬프트가 비어 있습니다."
+            return None, t("settings.v_img_prompt_empty")
         values["user_prompt_image"] = user_prompt
         try:
             values["temperature"] = float(
                 str(self.temperature_field.stringValue()).strip()
             )
         except ValueError:
-            return None, "Temperature는 숫자여야 합니다."
+            return None, t("settings.v_temp")
         try:
             values["max_tokens"] = int(
                 str(self.max_tokens_field.stringValue()).strip()
             )
         except ValueError:
-            return None, "Max tokens는 정수여야 합니다."
+            return None, t("settings.v_maxtok")
         try:
             values["followup_max_turns"] = int(
                 str(self.followup_field.stringValue()).strip()
             )
         except ValueError:
-            return None, "Follow-up 턴 수는 정수여야 합니다."
+            return None, t("settings.v_followup")
         kwargs_text = str(self.template_kwargs_field.stringValue()).strip()
         if not kwargs_text:
             values["chat_template_kwargs"] = {}
@@ -847,23 +887,23 @@ class SettingsPaneController(NSObject):
             try:
                 kwargs = json.loads(kwargs_text)
             except ValueError:
-                return None, 'Template kwargs는 JSON이어야 합니다 (예: {"enable_thinking": false})'
+                return None, t("settings.v_kwargs_json")
             if not isinstance(kwargs, dict):
-                return None, "Template kwargs는 JSON 객체여야 합니다."
+                return None, t("settings.v_kwargs_obj")
             values["chat_template_kwargs"] = kwargs
         return values, None
 
     def _validateProviders(self):
         names = [str(p.get("name", "")).strip() for p in self._providers]
         if any(not n for n in names):
-            return "프로바이더 이름이 비어 있습니다."
+            return t("settings.v_pname_empty")
         if len(set(names)) != len(names):
-            return "프로바이더 이름이 중복됩니다."
+            return t("settings.v_pname_dup")
         for entry in self._providers:
             if not str(entry.get("base_url", "")).startswith("http"):
-                return f"'{entry['name']}' 서버 주소는 http(s)://로 시작해야 합니다."
+                return t("settings.v_url").format(name=entry["name"])
         if not str(self._providers[self._selected].get("explain_model", "")).strip():
-            return "활성 프로바이더의 설명 모델이 비어 있습니다."
+            return t("settings.v_explain_empty")
         return None
 
     def _commitKeychain(self):
@@ -913,6 +953,9 @@ class SettingsPaneController(NSObject):
         for key, binding in self._hotkey_bindings.items():
             if binding:
                 self.config.set(key, binding)
+        lang_index = self.language_popup.indexOfSelectedItem()
+        if 0 <= lang_index < len(self._language_codes):
+            self.config.set("language", self._language_codes[lang_index])
         selected = self.detail_control.selectedSegment()
         if 0 <= selected < len(self._detail_keys):
             self.config.set("explain_detail", self._detail_keys[selected])
@@ -923,7 +966,7 @@ class SettingsPaneController(NSObject):
         self.config.save()
         if self.on_saved is not None:
             self.on_saved()  # re-register hotkeys + rebuild the result panel
-        self.status_label.setStringValue_("저장됨 ✓")
+        self.status_label.setStringValue_(t("settings.saved"))
         active = self.config.active_provider()  # never log keys, only refs
         print(
             "settings saved:",
