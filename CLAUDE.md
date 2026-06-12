@@ -13,7 +13,7 @@ explanation in the configured language** (ko/en/zh/ja/fr/de — M11; UI strings
 + prompts via `app/i18n.py`, prompt keys resolve per `language` in config)
 from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default, or any external OpenAI-compatible provider — M9) into a floating
-panel near the cursor. **M0–M11 are shipped and running — v2 complete**
+panel near the cursor. **M0–M12 are shipped and running — v2 complete**
 (M7: JSONL history +
 History/Settings main window; M8 + M8.1: Liquid Glass UI — `NSGlassEffectView`
 panel (`glass_enabled`/`glass_style` in config), 150ms fade, auto-height,
@@ -26,7 +26,11 @@ errors; M10: `install.sh` Korean-TUI onboarding installer — RAM-tiered model
 recommendation with HF-verified catalog, server models in `models.env` — and
 the `macsist` CLI: status/start/stop/restart/logs/settings/history/doctor/
 update; M11: per-card history deletion + 6-language i18n with restart-free
-switching — as-built notes in `docs/SPEC.md` §5.5–5.7).
+switching; M12: real signed **Macsist.app** bundle — py2app standalone build
+(brew python@3.13 framework build; the miniforge python is static → build-only
+unusable), fixed self-signed "Macsist Signing" identity so TCC survives every
+redeploy, installed at `…/Application Support/Macsist/Macsist.app`, launchd
+runs the bundle executable — as-built notes in `docs/SPEC.md` §5.5–5.8).
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit
@@ -56,6 +60,11 @@ switching — as-built notes in `docs/SPEC.md` §5.5–5.7).
 - Staleness checks (request generation) happen on the **main thread**.
 - Every tunable (URLs, models, prompts, hotkeys, tokens, sizes) in config.
 - API keys (M9) go in the **Keychain**, never in config.json.
+- Bundle (M12): **never ad-hoc sign** (per-build CDHash resets TCC), never
+  change `CFBundleIdentifier`; assets via `config.asset_dir()` (RESOURCEPATH),
+  self-relaunch via `EXECUTABLEPATH` env (in-bundle `sys.executable` is the
+  embedded CLI python, not the app stub); copy bundles with `ditto` only.
+  Full packaging gotchas: SPEC §7.13.
 
 ## Build / run / deploy
 - Dev (foreground): `app/run.sh`. Prod: both app and server run as launchd
@@ -65,11 +74,14 @@ switching — as-built notes in `docs/SPEC.md` §5.5–5.7).
   Logs: `~/Library/Logs/Macsist/app.log`, `~/Library/Logs/llm-server/`.
   Server models/stack: `…/Application Support/Macsist/server/models.env`
   (absent = historical defaults; owned by install.sh, preserved by deploy).
-- TCC: grants attach to the **deployed venv python** (dev runs: to the
-  terminal/host). After granting Accessibility/Screen Recording → restart app.
-- Verification: use the `HE_DEBUG_*` env hooks (SPEC §1) — computer-use cannot
-  screenshot/type into this bundle-less app; see project memory
-  `verify-ui-without-screenshots`.
+  App deploys build the bundle: prerequisite `brew install python@3.13`
+  (deploy.sh dies with that hint if missing; install.sh installs it).
+- TCC: grants attach to the **signed bundle** (M12 — csreq: bundle id + the
+  "Macsist Signing" leaf cert, so redeploys keep them; dev runs still attach
+  to the terminal/host). After granting → restart app (`macsist restart app`).
+- Verification: use the `HE_DEBUG_*` env hooks (SPEC §1) — computer-use still
+  cannot reach the app even after M12 (allowlist resolver doesn't index apps
+  outside /Applications); see project memory `verify-ui-without-screenshots`.
 
 ## Workflow
 - **Plan mode before each milestone** (M5–M10 in `docs/SPEC.md` §6); verify

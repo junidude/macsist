@@ -7,6 +7,10 @@ __pycache__/
 *.pyc
 .venv/
 
+# py2app build output (M12)
+app/build/
+app/dist/
+
 # Logs
 *.log
 

@@ -11,7 +11,8 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPPORT_DIR="$HOME/Library/Application Support/Macsist"
-APP_DIR="$SUPPORT_DIR/app"
+APP_BUNDLE="$SUPPORT_DIR/Macsist.app"          # M12: signed py2app bundle
+APP_EXE="$APP_BUNDLE/Contents/MacOS/Macsist"
 SERVER_DIR="$SUPPORT_DIR/server"
 MODELS_ENV="$SERVER_DIR/models.env"
 APP_LABEL=com.macsist.app
@@ -55,7 +56,7 @@ confirm() {  # confirm <프롬프트> → rc 0(yes)
 # 어떤 python으로 configure.py를 돌릴지 (config.py/keychain.py는 stdlib-only)
 cfgpy() {
     if [[ -x "$PY_BASE" ]]; then echo "$PY_BASE"
-    elif [[ -x "$APP_DIR/.venv/bin/python" ]]; then echo "$APP_DIR/.venv/bin/python"
+    elif [[ -x "$APP_BUNDLE/Contents/MacOS/python" ]]; then echo "$APP_BUNDLE/Contents/MacOS/python"
     else command -v python3; fi
 }
 
@@ -68,7 +69,8 @@ RAM_GB=$(($(sysctl -n hw.memsize) / 1073741824))
 DISK_GB=$(df -g / | awk 'NR==2{print $4}')
 CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo Apple Silicon)"
 ok "$CHIP / RAM ${RAM_GB}GB / 디스크 여유 ${DISK_GB}GB / macOS $(sw_vers -productVersion)"
-[[ -f "$APP_DIR/main.py" ]] && warn "기존 설치가 감지되었습니다 — 재실행은 안전합니다."
+[[ -x "$APP_EXE" || -f "$SUPPORT_DIR/app/main.py" ]] \
+    && warn "기존 설치가 감지되었습니다 — 재실행은 안전합니다."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 언어 선택 (M11) — 앱 UI + 답변 언어. 인스톨러 TUI 자체는 한국어 유지.
@@ -334,8 +336,15 @@ fi
 # 5. 앱 배포 + macsist CLI
 # ─────────────────────────────────────────────────────────────────────────────
 say "4/7 메뉴 바 앱 배포"
+# M12: py2app 번들 빌드에는 framework 빌드 python이 필요 (miniforge는 정적).
+BREW_PY=/opt/homebrew/opt/python@3.13/bin/python3.13
+if [[ ! -x "$BREW_PY" ]]; then
+    command -v brew >/dev/null || die "Homebrew가 필요합니다: https://brew.sh"
+    echo "  python@3.13 설치 중 (앱 번들 빌드용)…"
+    brew install -q python@3.13 || die "python@3.13 설치 실패"
+fi
 bash "$REPO_ROOT/app/deploy.sh" || die "앱 배포 실패"
-ok "앱 LaunchAgent 가동"
+ok "앱 LaunchAgent 가동 (Macsist.app)"
 
 say "5/7 macsist CLI 설치"
 CLI_SRC="$REPO_ROOT/cli/macsist"
@@ -385,7 +394,8 @@ if [[ "$TCC_LINE" == *"accessibility=True"* ]]; then
     skip "손쉬운 사용 권한"
 else
     echo "  ${BOLD}손쉬운 사용${RESET} 권한이 필요합니다 (핫키·텍스트 캡처)."
-    echo "  방금 앱이 시스템 설정을 열고 권한을 요청했습니다 — 목록에서 ${BOLD}python${RESET}을 허용하세요."
+    echo "  방금 앱이 시스템 설정을 열고 권한을 요청했습니다 — 목록에서 ${BOLD}Macsist${RESET}를 허용하세요."
+    echo "  ${DIM}예전 항목 'python'이 목록에 남아 있으면 −로 제거해도 됩니다.${RESET}"
     echo "  허용하면 앱이 자동으로 재시작됩니다. (s + Enter = 건너뛰기)"
     while [[ "$TCC_LINE" != *"accessibility=True"* ]]; do
         read -r -t 3 -p "" REPLY 2>/dev/null || true
@@ -401,8 +411,8 @@ elif [[ -n "$TCC_LINE" ]]; then
     echo "  ${BOLD}화면 기록${RESET} 권한은 영역 캡처 설명에 필요합니다 (텍스트 설명은 없어도 동작)."
     if confirm "지금 설정할까요?"; then
         open "$URL_PANE_SCREEN"
-        echo "  목록에 python이 없으면 '+'로 다음 경로를 추가하세요:"
-        echo "    $(readlink -f "$APP_DIR/.venv/bin/python")"
+        echo "  목록에 Macsist가 없으면 '+'로 다음 앱을 추가하세요 (파일 선택 창에서 ⌘⇧G로 경로 입력):"
+        echo "    $APP_BUNDLE"
         while true; do
             read -r -p "  허용했으면 Enter (s + Enter = 건너뛰기): " REPLY
             [[ "$REPLY" == s ]] && { warn "건너뜀 — 첫 영역 캡처 때 다시 요청됩니다."; break; }
@@ -458,7 +468,7 @@ SMOKE_OUT=$(mktemp)
 HE_DEBUG_SKIP_AX_PROMPT=1 HE_DEBUG_KEEP_PANEL=1 \
 HE_DEBUG_FAKE_TEXT="안녕하세요. 맥시스트 설치 테스트입니다." \
 HE_DEBUG_EXPLAIN_AFTER=2 \
-    "$APP_DIR/.venv/bin/python" "$APP_DIR/main.py" > "$SMOKE_OUT" 2>&1 &
+    "$APP_EXE" > "$SMOKE_OUT" 2>&1 &
 SMOKE_PID=$!
 SMOKE_OK=0
 for _ in $(seq 1 60); do

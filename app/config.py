@@ -5,6 +5,7 @@ Unknown keys in the file are preserved so manual edits survive upgrades.
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -12,6 +13,17 @@ import i18n
 
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "Macsist"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+
+
+def asset_dir() -> Path:
+    """assets/ next to the modules (dev run) or Contents/Resources/assets
+    inside the bundle (M12 — RESOURCEPATH is set by the py2app stub; module
+    __file__ lives in site-packages.zip there, so it can't be used)."""
+    rp = os.environ.get("RESOURCEPATH")
+    if rp:
+        return Path(rp) / "assets"
+    return Path(__file__).resolve().parent / "assets"
+
 # Pre-rename location: through M7 the whole product was called HotkeyExplain;
 # now that's just the hotkey-explain feature and the product is Macsist.
 _LEGACY_DIR = Path.home() / "Library" / "Application Support" / "HotkeyExplain"

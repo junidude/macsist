@@ -4,7 +4,6 @@ Accessory activation policy = LSUIElement equivalent: no Dock icon, menu bar onl
 """
 
 import os
-import pathlib
 import sys
 
 import objc
@@ -33,7 +32,7 @@ from PyObjCTools import AppHelper
 
 from explain_controller import URL_PANE_ACCESSIBILITY
 
-from config import ConfigStore
+from config import ConfigStore, asset_dir
 from explain_controller import ExplainController
 from health import ServerHealthMonitor
 from history_store import HistoryStore
@@ -184,7 +183,16 @@ class _AXGrantWaiter(NSObject):
         timer.invalidate()
         print("Accessibility granted — relaunching to attach the event tap.",
               flush=True)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        # In the bundle (M12), sys.executable is the embedded CLI interpreter
+        # (Contents/MacOS/python), NOT the app stub — exec'ing it would lose
+        # the bundle identity. The py2app launcher exports EXECUTABLEPATH
+        # (Contents/MacOS/Macsist); exec-in-place keeps the PID, so launchd
+        # KeepAlive is unaffected either way.
+        exe = os.environ.get("EXECUTABLEPATH")
+        if exe:
+            os.execv(exe, [exe])
+        else:  # dev run (app/run.sh)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def main():
@@ -202,7 +210,7 @@ def main():
     )
     # Dock icon (user asset) — shown while the History window has the app in
     # Regular policy; a bundle-less python process has no Info.plist icon.
-    icns = pathlib.Path(__file__).parent / "assets" / "macsist.icns"
+    icns = asset_dir() / "macsist.icns"
     if icns.exists():
         from AppKit import NSImage
         icon = NSImage.alloc().initWithContentsOfFile_(str(icns))

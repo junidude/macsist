@@ -97,7 +97,7 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
   and "항상 위" (`history_window_floating` → NSFloatingWindowLevel); the list
   live-refreshes while visible (`HistoryStore.on_appended`). Cmd-Tab: while
   the window is open the app switches to the **Regular** activation policy
-  (Dock + Cmd-Tab; name shows as "Python" until the M10 bundle) and reverts to
+  (Dock + Cmd-Tab; M12부터 Macsist 이름+아이콘으로 표시) and reverts to
   Accessory on close; a global hotkey (`hotkey_open_history`, default ⌘⇧H,
   recordable in Settings) toggles the window from anywhere.
 
@@ -118,8 +118,10 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `main_window.py` | `MainWindowController` — History/Settings window (NSTabView, master-detail history list, search, copy/re-ask, 기록 저장·항상 위 toggles) |
 | `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune/rewrite + `delete_records` (M11) |
 | `i18n.py` | M11 — UI strings (6 languages) + per-language prompt defaults; `t()` / `set_language()`; pure data, stdlib-only |
-| `config.py` | JSON store at `~/Library/Application Support/Macsist/config.json`; prompt keys resolve per `language` (M11, §5.7) |
-| `run.sh` / `deploy.sh` | dev run / launchd deploy |
+| `config.py` | JSON store at `~/Library/Application Support/Macsist/config.json`; prompt keys resolve per `language` (M11, §5.7); `asset_dir()` (M12 — RESOURCEPATH/번들 분기) |
+| `setup.py` | M12 — py2app 빌드 설정 (Info.plist, packages, extra_scripts) |
+| `macsist_notify.py` | M12 — 분산 알림 포스터 (`Contents/MacOS/macsist_notify`) |
+| `run.sh` / `deploy.sh` | dev run (리포 venv, 번들 없음) / py2app 빌드+서명+번들 launchd 배포 (M12, §5.8) |
 
 ### Config reference (all tunables live here)
 `providers` (M9 — ordered `{name, base_url, api_key_env_or_value,
@@ -462,6 +464,66 @@ lang=…`, `window content rebuilt lang=…`. NSTabView keeps only the selected
 tab's view in the hierarchy — harness assertions on the other tab must use
 direct references (e.g. `mw.copy_button`), not a view walk.
 
+### 5.8 .app 번들화 (M12, as built)
+
+**What.** `app/deploy.sh`가 "py 복사 + venv" 대신 **py2app standalone 빌드 +
+고정 자체서명 + 번들 설치**를 수행한다. 산출물
+`~/Library/Application Support/Macsist/Macsist.app`을 launchd가 직접 실행
+(`ProgramArguments = [...Contents/MacOS/Macsist]`) — Dock/Cmd-Tab/TCC 목록에
+"Python" 대신 Macsist 이름+아이콘이 뜬다. 셸 런처/심링크 금지: 프로세스 실행
+파일이 `Contents/MacOS/` 밖이면 `NSBundle.mainBundle`이 번들을 못 찾는다.
+
+**Build python.** miniforge base는 **정적 빌드**(`Py_ENABLE_SHARED=0`,
+`libpython3.13.a`)라 py2app 런타임으로 쓸 수 없다 → **brew `python@3.13`**
+(framework 빌드)로 빌드 venv(`$SUPPORT_DIR/build-venv`, 깨지면 자동 재생성)를
+만들어 `python setup.py py2app` (py2app 0.28.10 고정). 서버 conda 스택 무관.
+`app/setup.py` OPTIONS 요점: `resources: ["assets"]`,
+`extra_scripts: ["macsist_notify.py"]` (→ `Contents/MacOS/macsist_notify`,
+번들 런타임 공유 — CLI의 분산 알림 포스터), `packages`에 pynput/httpx 계열
++certifi+PyObjC 패키지(전부 site-packages.zip 밖 실디렉토리로 — pynput 런타임
+백엔드 import, certifi cacert.pem 실경로, PyObjC lazy-load 보호).
+**PyObjCTools는 packages에 넣으면 안 됨** — 네임스페이스 패키지라 modulegraph가
+죽는다 (main.py의 정적 import로는 정상 수집). `LSUIElement: True`는 초기
+정책일 뿐, 런타임 Regular 전환(M7)은 그대로 동작; Dock 아이콘은 번들 icns가
+공급하고 `setApplicationIconImage_`는 dev-run 폴백으로 유지.
+
+**Signing / TCC 영속.** CN "Macsist Signing" 자체서명 인증서(RSA-2048, 10년,
+codeSigning EKU critical)를 deploy.sh가 최초 1회 생성: openssl로 키/인증서 →
+**PEM으로 따로 import** (OpenSSL 3.x pkcs12 기본 알고리즘은
+SecKeychainItemImport MAC 검증 실패 — p12 금지) + `-T /usr/bin/codesign` →
+`security add-trusted-cert -r trustRoot -p codeSign`을 **login keychain
+사용자 도메인**에 — sudo 불필요 (macOS 26.2 실증). 서명은 inside-out:
+`xattr -cr` → 내장 Python.framework → Resources 하위 `*.so`/`*.dylib`(--deep이
+Resources는 안 내려감) → `--deep` 외부 서명 → verify. 산출 csreq
+`identifier "com.macsist.app" and certificate leaf = H"…"` — 번들 ID·인증서
+고정이므로 재빌드마다 동일 → TCC 유지. **ad-hoc 서명 금지**: CDHash 기반 DR이
+빌드마다 바뀌어 재배포 시 TCC가 풀린다. 설치 복사는 **`ditto`** (cp -R은 서명
+메타데이터를 깨뜨릴 수 있음). launchd 교체 순서: bootout → 번들 스왑+재검증 →
+plist → bootstrap(5회 재시도) → 성공 후에만 구 `…/Macsist/app` venv 배포 제거.
+
+**코드 적응 3곳.** ① `config.asset_dir()` — py2app 스텁이 export하는
+`RESOURCEPATH` env 있으면 `Resources/assets`, 없으면 `__file__` 옆 (dev run);
+main.py icns / menubar.py 템플릿 PDF가 사용 (번들 안 모듈 `__file__`은
+site-packages.zip 내부라 직접 못 씀). ② AX 허용 후 자가 재실행: 번들 안
+`sys.executable`은 앱 스텁이 아니라 **동봉 CLI 인터프리터**
+(`Contents/MacOS/python`) → `EXECUTABLEPATH` env(스텁이 export)로
+`os.execv` (PID 유지, KeepAlive 무관; dev run은 기존 sys.executable 폴백).
+③ `cli/macsist`: `pybin()` 1순위가 번들 `Contents/MacOS/python`(stdlib-only
+configure.py 실행 — 단독 실행 가능 실증), 알림은 `macsist_notify`, doctor에
+번들 존재 + `codesign --verify --deep --strict` 검사 추가. install.sh는
+4단계 직전 brew python@3.13 자동 설치, 6단계 문구 Macsist 기준(화면 기록 '+'
+는 `$APP_BUNDLE` 경로 + ⌘⇧G 힌트), 7단계 스모크 `"$APP_EXE"` 직접 실행
+(HE_DEBUG_* env는 스텁을 그대로 통과).
+
+**Found while building.** httpx 0.28은 sniffio에 의존하지 않는다 (packages에
+넣으면 modulegraph가 죽음 — venv에 실제 설치된 것만 나열). 번들을
+`lsregister -f`로 등록해도 computer-use의 앱 allowlist resolver는
+/Applications 밖 앱을 못 찾는다 — 스크린샷 검증은 M12 이후에도 불가, HE_DEBUG
+훅 체계 유지 (프로젝트 메모리 `verify-ui-without-screenshots`). 기존 설치
+이행: 번들 = 새 TCC 정체성이라 일회성 재허용 필요 — 앱이 스스로 프롬프트해
+목록에 등록되고, grant 즉시 `_AXGrantWaiter`가 EXECUTABLEPATH 재실행으로
+이벤트 탭을 붙인다 (라이브 이행에서 그대로 관찰됨).
+
 ---
 
 ## 6. Milestones
@@ -625,6 +687,29 @@ memory `verify-ui-without-screenshots`).
   installer `set-language de` sandbox + invalid-code rejection. Live debugging
   found a pre-M4 prompt variant pinned in the real config blocking the
   switch → added to `_SUPERSEDED_DEFAULTS` (gotcha recorded in §5.7).
+- **M12 — .app 번들화** (§5.8). **DONE (2026-06-13).**
+  *AC:* Cmd-Tab/Dock/TCC 목록에 Macsist 이름+아이콘; 재배포(`macsist update`)
+  후 TCC 재허용 없이 핫키 동작; install.sh가 빈 상태에서 번들 설치까지 한
+  세션 완주(M10 AC 유지); 기존 기능 회귀 없음.
+  *AC verified (2026-06-13, live):* py2app 0.28.10 + brew python@3.13으로
+  45MB Macsist.app 빌드(`Contents/MacOS/`에 Macsist/macsist_notify/python),
+  "Macsist Signing" 서명 — `codesign -dr-`의 designated requirement가 두
+  풀 리빌드에서 바이트 동일(`identifier "com.macsist.app" and certificate
+  leaf = H"ca77…"`); launchd가 번들 직접 실행, `lsappinfo`가
+  `LSDisplayName="Macsist"` 보고(Dock/Cmd-Tab 명칭). **TCC 영속**: 손쉬운
+  사용/화면 기록 1회 허용 후 풀 리빌드+재서명+재배포 →
+  `TCC: accessibility=True screen_recording=True` 유지 + 핫키 attach
+  (재허용 0회 — M12 핵심 AC). AX grant 시 EXECUTABLEPATH exec-재실행이
+  라이브로 관찰됨("Accessibility granted — relaunching" → True → listening).
+  회귀(HE_DEBUG, 배포 번들 포그라운드): 텍스트 explain+follow-up 스트림,
+  REGION_RECT 영역 explain, OPEN_HISTORY+UI_AUDIT 창 감사, SET_LANGUAGE
+  ko→en 전환 모두 통과; `macsist status|doctor|logs|settings|history|
+  restart|update` 전부 동작(doctor에 서명 검사 추가). **설치 완주**:
+  move-aside 시뮬레이션(에이전트 bootout + Macsist 디렉토리/plist 백업) →
+  스크립트 입력으로 install.sh가 서버 재배포·번들 빌드·CLI·TCC(손쉬운 사용
+  "[건너뜀 — 이미 완료]" — 새로 빌드된 번들이 csreq로 grant 승계, 이행 AC)·
+  서버 chat 프로브·앱 왕복 스모크까지 rc=0 완주; 라이브 상태 복원 후
+  권한·핫키 정상.
 
 ---
 
@@ -679,6 +764,19 @@ memory `verify-ui-without-screenshots`).
     on the **main thread**; worker-side checks alone race the next hotkey.
 12. **macOS 26 `screencapture` thumbnails/flags:** `-u` opts INTO UI (never
     pass); `-o` only affects window-mode shadows; CLI has no thumbnail.
+13. **py2app 번들 + 서명 (M12):** ① 빌드 python은 framework/shared 빌드여야
+    한다 — miniforge base는 **정적**(`libpython3.13.a`)이라 불가, brew
+    `python@3.13` 사용. ② 번들 안 `sys.executable`은 앱 스텁이 아니라 동봉
+    CLI 인터프리터 — 자가 재실행은 반드시 `EXECUTABLEPATH` env로. ③ 에셋은
+    `RESOURCEPATH` env 기반 `config.asset_dir()`로만 (`__file__`은
+    site-packages.zip 내부). ④ **ad-hoc 서명 금지** — CDHash DR이 빌드마다
+    바뀌어 TCC가 풀린다; 고정 "Macsist Signing" 인증서 + 불변
+    `CFBundleIdentifier`가 csreq를 고정한다. ⑤ 인증서는 PEM으로 import
+    (OpenSSL 3.x p12는 SecKeychainItemImport가 거부), 신뢰는 사용자 도메인
+    `add-trusted-cert -p codeSign`으로 충분(sudo 불필요). ⑥ 번들 복사는
+    `ditto`만 (cp -R은 서명 깨짐). ⑦ setup.py `packages`에 네임스페이스
+    패키지(PyObjCTools)나 미설치 패키지(sniffio)를 넣으면 modulegraph가
+    죽는다.
 
 ---
 
@@ -687,6 +785,8 @@ memory `verify-ui-without-screenshots`).
 ```
 macsist/
   app/                  menu-bar app (PyObjC) — see §1 file map
+  app/setup.py          (M12) py2app build config (bundle identity/plist)
+  app/macsist_notify.py (M12) extra_scripts notification poster
   server/               FastAPI proxy + mlx backends, launchd deploy
   docs/SPEC.md          this file
   README.md             user-facing: install, server ops, troubleshooting

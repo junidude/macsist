@@ -162,12 +162,18 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.macsist.llm-server
 
 ## Always-on (menu-bar app)
 
-`app/deploy.sh` mirrors the server pattern: copies `app/*.py` to
-`~/Library/Application Support/Macsist/app/` (launchd cannot read
-`~/Documents`), builds a venv there, and installs
-`~/Library/LaunchAgents/com.macsist.app.plist` (RunAtLoad + KeepAlive).
+`app/deploy.sh` (M12) builds a real **signed app bundle**: py2app standalone
+build (requires `brew install python@3.13` — a framework-build Python; the
+miniforge one is static and can't be embedded), signs it with the self-signed
+"Macsist Signing" identity (created automatically on first deploy, no sudo),
+installs it at `~/Library/Application Support/Macsist/Macsist.app` (launchd
+cannot read `~/Documents`), and installs
+`~/Library/LaunchAgents/com.macsist.app.plist` (RunAtLoad + KeepAlive) running
+the bundle executable. Dock/Cmd-Tab and the TCC permission lists show
+**Macsist** with its icon.
 
-TCC note: grants attach to the **deployed venv's python** — on first launch the
+TCC note: grants attach to the **signed bundle** (bundle id + certificate, both
+fixed) — so they survive every redeploy/`macsist update`. On first launch the
 Accessibility prompt appears (startup check in `main.py`); grant it (plus Screen
 Recording on first region capture) and restart:
 `launchctl kickstart -k "gui/$(id -u)/com.macsist.app"`. These grants are

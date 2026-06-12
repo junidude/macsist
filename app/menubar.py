@@ -1,7 +1,5 @@
 """StatusItemController — menu bar status item and menu."""
 
-import pathlib
-
 import objc
 from AppKit import (
     NSImage,
@@ -13,6 +11,7 @@ from AppKit import (
 )
 from Foundation import NSMakeSize
 
+from config import asset_dir
 from i18n import current_language, t
 from main_window import MainWindowController
 
@@ -24,9 +23,7 @@ _SERVER_STATES = {
     "down":    ("exclamationmark.bubble", "M!", "menubar.server_down"),
 }
 
-_MENUBAR_ICON_PATH = (
-    pathlib.Path(__file__).parent / "assets" / "macsist-menubarTemplate.pdf"
-)
+_MENUBAR_ICON_PATH = asset_dir() / "macsist-menubarTemplate.pdf"
 
 
 def _load_menubar_icon():
