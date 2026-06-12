@@ -12,11 +12,13 @@
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST_DIR="$HOME/Library/Application Support/HotkeyExplain/app"
+DEST_DIR="$HOME/Library/Application Support/Macsist/app"
 PY=/opt/homebrew/Caskroom/miniforge/base/bin/python3
-LABEL=com.hotkeyexplain.app
+LABEL=com.macsist.app
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG_DIR="$HOME/Library/Logs/HotkeyExplain"
+LOG_DIR="$HOME/Library/Logs/Macsist"
+# Pre-rename (≤M7) agent — retire it so two apps don't fight over the hotkeys.
+LEGACY_LABEL=com.hotkeyexplain.app
 
 mkdir -p "$DEST_DIR" "$LOG_DIR"
 cp "$SRC_DIR"/*.py "$SRC_DIR/requirements.txt" "$DEST_DIR/"
@@ -49,11 +51,13 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
+launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 
 echo "Deployed app to: $DEST_DIR"
 echo "LaunchAgent (re)loaded: $LABEL"
-echo "  status:  launchctl list | grep hotkeyexplain"
+echo "  status:  launchctl list | grep macsist"
 echo "  logs:    tail -f $LOG_DIR/app.log"
 echo "  restart: launchctl kickstart -k gui/\$(id -u)/$LABEL"

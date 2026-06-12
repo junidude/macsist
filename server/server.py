@@ -1,5 +1,5 @@
 """
-LLM proxy server for HotkeyExplain.
+LLM proxy server for Macsist.
 Listens on :8000, routes /v1/chat/completions to the appropriate mlx backend.
 
 Model routing:

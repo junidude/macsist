@@ -5,7 +5,9 @@
 > before planning any milestone.
 
 ## Project
-Native macOS **menu-bar app** ("macsist / HotkeyExplain"). Global hotkey →
+Native macOS **menu-bar app** — product name **Macsist**; "HotkeyExplain" is
+its hotkey-explain feature (legacy codename — `HE_DEBUG_*` hooks keep the
+initialism; launchd labels/dirs are `com.macsist.*`, `…/Macsist/`). Global hotkey →
 captures **selected text** or a **screen region** → streams a **concise Korean
 explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default; external OpenAI-compatible providers planned in M9) into a floating
@@ -45,8 +47,8 @@ remaining v2 work = M8–M10 (glass UI, providers, onboarding installer +
 ## Build / run / deploy
 - Dev (foreground): `app/run.sh`. Prod: both app and server run as launchd
   agents — redeploy with `app/deploy.sh` / `server/deploy.sh`; restart with
-  `launchctl kickstart -k "gui/$(id -u)/com.hotkeyexplain.app"`.
-  Logs: `~/Library/Logs/HotkeyExplain/app.log`, `~/Library/Logs/llm-server/`.
+  `launchctl kickstart -k "gui/$(id -u)/com.macsist.app"`.
+  Logs: `~/Library/Logs/Macsist/app.log`, `~/Library/Logs/llm-server/`.
 - TCC: grants attach to the **deployed venv python** (dev runs: to the
   terminal/host). After granting Accessibility/Screen Recording → restart app.
 - Verification: use the `HE_DEBUG_*` env hooks (SPEC §1) — computer-use cannot

@@ -1,4 +1,12 @@
-# SPEC.md — "macsist / HotkeyExplain" (local-LLM macOS assistant)
+# SPEC.md — "Macsist" (local-LLM macOS assistant)
+
+> Naming (since 2026-06-12): **Macsist** is the product — window title, menu,
+> launchd labels `com.macsist.*`, data dir `~/Library/Application Support/
+> Macsist/`, logs `~/Library/Logs/Macsist/`. **HotkeyExplain** is its
+> hotkey-explain *feature* (and the pre-M8 codename — the `HE_DEBUG_*` hook
+> prefix and `HE_EXPECTED_BACKENDS` keep that initialism on purpose).
+> `config.py` auto-migrates config.json/history.jsonl from the legacy
+> HotkeyExplain dir on first run.
 
 > v2 spec, revised **2026-06-12**. v1 (M0–M4) is **shipped and running**; this
 > document records what exists, the engineering invariants learned while
@@ -48,7 +56,7 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 - **Thinking models** — `delta.reasoning` handled; `chat_template_kwargs:
   {"enable_thinking": false}` sent by default *(config)*.
 - **Always-on** — both the LLM server and the app run as launchd LaunchAgents
-  (`com.hotkeyexplain.llm-server`, `com.hotkeyexplain.app`), auto-start at
+  (`com.macsist.llm-server`, `com.macsist.app`), auto-start at
   login, auto-restart on crash. `app/deploy.sh` / `server/deploy.sh` redeploy.
 - **Server status (M5)** — proxy `/health` probes both backends
   (`{"status":"ok"|"loading","backends":{"vlm":…,"lm":…}}`; expected set via
@@ -73,7 +81,7 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
   the panel to `panel_height_expanded`; any hotkey press starts a fresh session.
 - **History + main window (M7)** — every completed request (text/region/
   followup, success or partial; content-less errors skipped) appends one JSONL
-  record to `~/Library/Application Support/HotkeyExplain/history.jsonl`
+  record to `~/Library/Application Support/Macsist/history.jsonl`
   (ts/mode/model/input/response/detail — region records store the prompt, never
   the base64 image). Written from `_commitSession` (main thread); pruned by
   atomic file rewrite past `history_max_items`. The menu bar's History…/
@@ -100,7 +108,7 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `settings_window.py` | `SettingsPaneController` — settings controls built into a host view (combos / recorders / detail segments / 고급 flap); window-less since M7 |
 | `main_window.py` | `MainWindowController` — History/Settings window (NSTabView, master-detail history list, search, copy/re-ask, 기록 저장·항상 위 toggles) |
 | `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune |
-| `config.py` | JSON store at `~/Library/Application Support/HotkeyExplain/config.json` |
+| `config.py` | JSON store at `~/Library/Application Support/Macsist/config.json` |
 | `run.sh` / `deploy.sh` | dev run / launchd deploy |
 
 ### Config reference (all tunables live here)
@@ -221,7 +229,7 @@ typing without activating our app; the source app keeps visual focus).
   starts.
 
 ### 5.2 History + main window (M7)
-- **Store:** JSONL at `~/Library/Application Support/HotkeyExplain/history.jsonl`
+- **Store:** JSONL at `~/Library/Application Support/Macsist/history.jsonl`
   (append-only; one record per completed request: ts, mode
   text/region/followup, model, input snippet ≤`history_snippet_chars`, full
   response, detail level). Region mode stores the prompt + response, **not the
@@ -387,7 +395,7 @@ memory `verify-ui-without-screenshots`).
    `StreamHandle` does a raw `socket.shutdown()` (llm_client.py docstring).
    Do not bypass it.
 8. **launchd + TCC:** agents cannot read `~/Documents` → deploy copies to
-   `~/Library/Application Support/HotkeyExplain/`. TCC grants attach to the
+   `~/Library/Application Support/Macsist/`. TCC grants attach to the
    **deployed venv python**; Accessibility/Screen Recording grants require an
    app **restart** to take effect (`launchctl kickstart -k`). Dev-shell runs
    attach grants to the terminal/host app instead.

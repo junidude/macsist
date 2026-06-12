@@ -14,10 +14,10 @@ from main_window import MainWindowController
 
 # server state → (SF Symbol, title fallback, status-line text)
 _SERVER_STATES = {
-    "unknown": ("text.bubble", "HE", "서버: 확인 중…"),
-    "ok":      ("text.bubble", "HE", "서버: 정상"),
-    "loading": ("ellipsis.bubble", "HE…", "서버: 모델 로딩 중…"),
-    "down":    ("exclamationmark.bubble", "HE!", "서버: 연결 안 됨"),
+    "unknown": ("text.bubble", "M", "서버: 확인 중…"),
+    "ok":      ("text.bubble", "M", "서버: 정상"),
+    "loading": ("ellipsis.bubble", "M…", "서버: 모델 로딩 중…"),
+    "down":    ("exclamationmark.bubble", "M!", "서버: 연결 안 됨"),
 }
 
 
@@ -55,7 +55,7 @@ class StatusItemController(NSObject):
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(
             NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Quit HotkeyExplain", "terminate:", "q"
+                "Quit Macsist", "terminate:", "q"
             )
         )
         self.status_item.setMenu_(menu)
@@ -104,7 +104,7 @@ class StatusItemController(NSObject):
         )
         self.server_status_item.setTitle_(status_line)
         icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            symbol, "HotkeyExplain"
+            symbol, "Macsist"
         )
         button = self.status_item.button()
         if icon is not None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run HotkeyExplain. Creates the venv + installs deps on first run.
+# Run Macsist. Creates the venv + installs deps on first run.
 set -euo pipefail
 cd "$(dirname "$0")"
 

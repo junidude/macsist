@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Simple interactive terminal chat against the local LLM server (:8000).
-Same streaming path the HotkeyExplain app uses.
+Same streaming path the Macsist app uses.
 
 Usage:
     python3 chat.py                 # explain model (35B, multimodal)

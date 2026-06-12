@@ -1,14 +1,29 @@
-"""ConfigStore — JSON-backed settings at ~/Library/Application Support/HotkeyExplain/.
+"""ConfigStore — JSON-backed settings at ~/Library/Application Support/Macsist/.
 
 Every tunable lives here (hard rule: no hardcoding in feature code).
 Unknown keys in the file are preserved so manual edits survive upgrades.
 """
 
 import json
+import shutil
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / "Library" / "Application Support" / "HotkeyExplain"
+CONFIG_DIR = Path.home() / "Library" / "Application Support" / "Macsist"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+# Pre-rename location: through M7 the whole product was called HotkeyExplain;
+# now that's just the hotkey-explain feature and the product is Macsist.
+_LEGACY_DIR = Path.home() / "Library" / "Application Support" / "HotkeyExplain"
+
+
+def _migrate_legacy_data():
+    """One-time move of user data after the Macsist rename. The legacy dir
+    also holds old app/server deployments — those are redeployed, not moved."""
+    for name in ("config.json", "history.jsonl"):
+        old, new = _LEGACY_DIR / name, CONFIG_DIR / name
+        if old.exists() and not new.exists():
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.move(old, new)
+            print(f"migrated {name}: HotkeyExplain/ -> Macsist/", flush=True)
 
 DEFAULTS = {
     "server_base_url": "http://127.0.0.1:8000",
@@ -104,6 +119,7 @@ _SUPERSEDED_DEFAULTS = {
 
 class ConfigStore:
     def __init__(self):
+        _migrate_legacy_data()
         self._data = dict(DEFAULTS)
         self.load()
 

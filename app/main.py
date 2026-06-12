@@ -1,4 +1,4 @@
-"""HotkeyExplain entry point.
+"""Macsist entry point.
 
 Accessory activation policy = LSUIElement equivalent: no Dock icon, menu bar only.
 """
@@ -79,7 +79,7 @@ def main():
     main_window.settings.on_saved = _explain.reloadHotkeys
     main_window.settings.on_record_changed = _explain.pauseHotkeys_
     main_window.on_reask = _explain.resubmit_text
-    print("HotkeyExplain started (menu bar). Config:", str(config.get("server_base_url")))
+    print("Macsist started (menu bar). Config:", str(config.get("server_base_url")))
     AppHelper.runEventLoop()
 
 

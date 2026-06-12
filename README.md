@@ -1,9 +1,10 @@
-# macsist — HotkeyExplain
+# Macsist
 
-Native macOS **menu-bar app**: press a global hotkey to get a **concise Korean
-explanation** of whatever you have **selected** (any app) or of a **screen
-region** you drag-select — streamed token-by-token into a small floating panel
-near the cursor, from a **local** LLM (MLX). No cloud, no Electron.
+Native macOS **menu-bar assistant**. Its core feature, **HotkeyExplain**: press
+a global hotkey to get a **concise Korean explanation** of whatever you have
+**selected** (any app) or of a **screen region** you drag-select — streamed
+token-by-token into a small floating panel near the cursor, from a **local**
+LLM (MLX). No cloud, no Electron.
 
 - **Text explain** (default `⌘⇧E`): reads the selection via Accessibility,
   falling back to a clipboard-safe synthetic ⌘C (clipboard is always restored).
@@ -12,7 +13,7 @@ near the cursor, from a **local** LLM (MLX). No cloud, no Electron.
 - **Follow-up questions**: after an answer, type "이어서 질문…" directly in the
   panel — same conversation, same model (vision sessions keep the image).
 - **History** (menu-bar icon → History…): every completed explain is saved to
-  `~/Library/Application Support/HotkeyExplain/history.jsonl` (text only —
+  `~/Library/Application Support/Macsist/history.jsonl` (text only —
   region screenshots are never stored). The window lists past Q/A newest-first
   with search; select a row for the full text, then 복사 or 다시 질문 (re-runs
   it with the current model). "기록 저장" toggles saving off; "항상 위" keeps
@@ -38,7 +39,7 @@ app/deploy.sh
 
 On first launch grant **Accessibility** (prompted) and, on first region
 capture, **Screen Recording**, then restart:
-`launchctl kickstart -k "gui/$(id -u)/com.hotkeyexplain.app"`.
+`launchctl kickstart -k "gui/$(id -u)/com.macsist.app"`.
 For development, run the app in the foreground instead with `app/run.sh`.
 Full spec and architecture: [docs/SPEC.md](docs/SPEC.md).
 
@@ -88,11 +89,11 @@ the `model` field in the request transparently routes to the right backend.
 | `server/start_server.sh` | Starts all 3 processes; `--supervise` mode for launchd |
 | `server/download_models.sh` | One-time model download |
 | `server/deploy.sh` | Copies scripts to a non-TCC location + (re)installs the LaunchAgent |
-| `~/Library/LaunchAgents/com.hotkeyexplain.llm-server.plist` | Always-on at login |
+| `~/Library/LaunchAgents/com.macsist.llm-server.plist` | Always-on at login |
 
 > **Why deploy.sh exists:** `~/Documents` is a TCC-protected folder that launchd
 > agents **cannot read** (`Operation not permitted`). `deploy.sh` copies the
-> scripts to `~/Library/Application Support/HotkeyExplain/server/` (not protected)
+> scripts to `~/Library/Application Support/Macsist/server/` (not protected)
 > and points the LaunchAgent there. Re-run it after editing `server.py` or
 > `start_server.sh`. The model cache (`~/.cache`) and logs (`~/Library/Logs`) are
 > not TCC-protected, so backends load fine.
@@ -105,11 +106,11 @@ loop exits when a child dies). `ThrottleInterval` 30s prevents tight crash loops
 
 ```bash
 # status (column 1 = supervising bash PID; "-" means not running)
-launchctl list | grep hotkeyexplain
+launchctl list | grep macsist
 
 # stop / start
-launchctl bootout  "gui/$(id -u)/com.hotkeyexplain.llm-server"
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.hotkeyexplain.llm-server.plist
+launchctl bootout  "gui/$(id -u)/com.macsist.llm-server"
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.macsist.llm-server.plist
 
 # re-deploy after editing scripts (does bootout+bootstrap for you)
 ~/Documents/macsist/server/deploy.sh
@@ -118,19 +119,19 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.hotkeyexplain.llm-
 ## Always-on (menu-bar app)
 
 `app/deploy.sh` mirrors the server pattern: copies `app/*.py` to
-`~/Library/Application Support/HotkeyExplain/app/` (launchd cannot read
+`~/Library/Application Support/Macsist/app/` (launchd cannot read
 `~/Documents`), builds a venv there, and installs
-`~/Library/LaunchAgents/com.hotkeyexplain.app.plist` (RunAtLoad + KeepAlive).
+`~/Library/LaunchAgents/com.macsist.app.plist` (RunAtLoad + KeepAlive).
 
 TCC note: grants attach to the **deployed venv's python** — on first launch the
 Accessibility prompt appears (startup check in `main.py`); grant it (plus Screen
 Recording on first region capture) and restart:
-`launchctl kickstart -k "gui/$(id -u)/com.hotkeyexplain.app"`. These grants are
+`launchctl kickstart -k "gui/$(id -u)/com.macsist.app"`. These grants are
 one-time, unlike dev runs where they attach to the terminal host.
 
 ```bash
 ~/Documents/macsist/app/deploy.sh           # (re)deploy after editing app/*.py
-tail -f ~/Library/Logs/HotkeyExplain/app.log
+tail -f ~/Library/Logs/Macsist/app.log
 ```
 
 ## Manual run (dev)

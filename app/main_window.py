@@ -145,7 +145,7 @@ class MainWindowController(NSObject):
             NSBackingStoreBuffered,
             False,
         )
-        self.window.setTitle_("HotkeyExplain")
+        self.window.setTitle_("Macsist")
         self.window.setReleasedWhenClosed_(False)
         self._applyFloating()
 

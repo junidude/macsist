@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the three server processes for HotkeyExplain.
+# Start the three server processes for Macsist.
 #
 # Usage:
 #   ./start_server.sh                 # start all, return to shell (manual/dev)
@@ -16,7 +16,7 @@
 #
 # NOTE: This script must live OUTSIDE ~/Documents (a TCC-protected folder that
 # launchd agents cannot read). It is deployed to
-#   ~/Library/Application Support/HotkeyExplain/server/
+#   ~/Library/Application Support/Macsist/server/
 # by deploy.sh. The HF model cache (~/.cache/huggingface) and logs
 # (~/Library/Logs) are not TCC-protected, so backends load fine from there.
 
@@ -99,7 +99,7 @@ PIDS+=($!)
 echo "  proxy PID=$! log=$LOG_DIR/proxy.log"
 
 echo ""
-echo "All servers started. HotkeyExplain endpoint: http://127.0.0.1:8000"
+echo "All servers started. Macsist endpoint: http://127.0.0.1:8000"
 
 if [[ "$MODE" == "--supervise" ]]; then
     # Block as the launchd job's main process. If ANY child dies, exit non-zero
