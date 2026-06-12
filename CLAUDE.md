@@ -11,10 +11,11 @@ initialism; launchd labels/dirs are `com.macsist.*`, `…/Macsist/`). Global hot
 captures **selected text** or a **screen region** → streams a **concise Korean
 explanation** from an LLM (local MLX server at `http://127.0.0.1:8000` by
 default; external OpenAI-compatible providers planned in M9) into a floating
-panel near the cursor. **M0–M7 are shipped and running** (M7: JSONL history +
-History/Settings main window — master-detail list, search, copy/re-ask;
-settings controls live in its Settings tab, `SettingsPaneController`);
-remaining v2 work = M8–M10 (glass UI, providers, onboarding installer +
+panel near the cursor. **M0–M8 are shipped and running** (M7: JSONL history +
+History/Settings main window, settings in its Settings tab via
+`SettingsPaneController`; M8: Liquid Glass UI — `NSGlassEffectView` panel with
+`glass_enabled` kill-switch, 150ms fade, auto-height, sidebar + unified-toolbar
+window chrome); remaining v2 work = M9–M10 (providers, onboarding installer +
 `macsist` CLI) — designs in `docs/SPEC.md` §5–6.
 
 ## Stack (locked)

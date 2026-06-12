@@ -1,15 +1,16 @@
-"""MainWindowController — the History/Settings window (M7).
+"""MainWindowController — the History/Settings window (M7, M8 glass chrome).
 
 A regular activating window (the never-steal-focus invariant applies only to
 the result panel; the old standalone settings window already activated the
-app the same way). Two tabs:
+app the same way). M8: a translucent source-list sidebar (기록/설정) drives a
+tabless NSTabView, and the search field lives in a unified glass toolbar.
 
-- History: master-detail over history.jsonl — search field + newest-first
-  table on top, full Q/A text below with 복사 / 다시 질문 buttons. Chosen over
-  inline row expansion deliberately: this bundle-less app cannot be verified
-  by screenshots, so the layout must stay fixed-frame simple.
+- History: master-detail over history.jsonl — newest-first table, full Q/A
+  text below with 복사 / 다시 질문 buttons. Chosen over inline row expansion
+  deliberately: this bundle-less app cannot be verified by screenshots, so
+  the layout must stay fixed-frame simple.
 - Settings: the SettingsPaneController controls (M0–M6 logic unchanged),
-  built into this window's tab via buildInView_.
+  built into this window's pane via buildInView_.
 
 Owned by StatusItemController (one instance, setReleasedWhenClosed_(False)).
 All methods run on the main thread.
@@ -27,24 +28,34 @@ from AppKit import (
     NSFloatingWindowLevel,
     NSFont,
     NSMakeRect,
+    NSNoTabsNoBorder,
     NSNormalWindowLevel,
     NSObject,
     NSPasteboard,
     NSPasteboardTypeString,
     NSScrollView,
-    NSSearchField,
+    NSSearchToolbarItem,
     NSTableColumn,
     NSTableView,
+    NSTableViewStyleSourceList,
     NSTabView,
     NSTabViewItem,
     NSTextField,
     NSTextView,
+    NSToolbar,
+    NSToolbarFlexibleSpaceItemIdentifier,
     NSView,
+    NSVisualEffectBlendingModeBehindWindow,
+    NSVisualEffectMaterialSidebar,
+    NSVisualEffectStateActive,
+    NSVisualEffectView,
     NSWindow,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskMiniaturizable,
     NSWindowStyleMaskTitled,
+    NSWindowToolbarStyleUnified,
 )
+from Foundation import NSIndexSet
 
 from settings_window import SettingsPaneController, pane_min_size
 
@@ -53,6 +64,8 @@ ROW_HEIGHT = 24
 DETAIL_HEIGHT = 170
 CONTENT_WIDTH = 760.0
 CONTENT_HEIGHT = 660.0
+SIDEBAR_WIDTH = 160.0
+_SEARCH_ITEM_ID = "search"
 
 _MODE_LABELS = {"text": "텍스트", "region": "화면", "followup": "추가질문"}
 
@@ -75,6 +88,41 @@ def _detail_text(record):
     )
 
 
+class _SidebarController(NSObject):
+    """Datasource/delegate for the source-list sidebar (M8). A separate
+    object on purpose: MainWindowController already serves the history table
+    and a shared delegate would make every callback ambiguous."""
+
+    _ITEMS = (("history", "기록"), ("settings", "설정"))
+
+    def initWithOwner_(self, owner):
+        self = objc.super(_SidebarController, self).init()
+        if self is None:
+            return None
+        self.owner = owner
+        self.table = None
+        return self
+
+    def numberOfRowsInTableView_(self, table):
+        return len(self._ITEMS)
+
+    def tableView_objectValueForTableColumn_row_(self, table, column, row):
+        return self._ITEMS[row][1]
+
+    def tableViewSelectionDidChange_(self, notification):
+        row = self.table.selectedRow()
+        if 0 <= row < len(self._ITEMS):
+            self.owner._sidebarSelected_(self._ITEMS[row][0])
+
+    def selectIdentifier_(self, identifier):
+        for i, (key, _label) in enumerate(self._ITEMS):
+            if key == identifier:
+                self.table.selectRowIndexes_byExtendingSelection_(
+                    NSIndexSet.indexSetWithIndex_(i), False
+                )
+                return
+
+
 class MainWindowController(NSObject):
     def initWithConfig_history_(self, config, history):
         self = objc.super(MainWindowController, self).init()
@@ -87,7 +135,9 @@ class MainWindowController(NSObject):
         self.on_reask_image = None  # main.py: ExplainController.resubmit_image
         self.window = None
         self.tab_view = None
-        self.search_field = None
+        self.sidebar = _SidebarController.alloc().initWithOwner_(self)
+        self.sidebar_effect = None
+        self.search_field = None  # the unified toolbar's search field (M8)
         self.table = None
         self.detail_view = None
         self.copy_button = None
@@ -122,6 +172,7 @@ class MainWindowController(NSObject):
         if self.window is None:
             self._buildWindow()
         self.tab_view.selectTabViewItemWithIdentifier_(tab_id)
+        self.sidebar.selectIdentifier_(tab_id)
         self._refreshTab_(tab_id)
         origin_env = os.environ.get("HE_DEBUG_WIN_ORIGIN")
         if origin_env:
@@ -149,15 +200,44 @@ class MainWindowController(NSObject):
             self.settings.refresh()
 
     def tabView_didSelectTabViewItem_(self, tab_view, item):
-        # user clicked the other tab — same refresh as opening it from the menu
+        # programmatic selection also lands here — same refresh as the menu
         self._refreshTab_(str(item.identifier()))
+
+    def _sidebarSelected_(self, identifier):
+        # sidebar click (M8) — the tab selection above triggers the refresh
+        self.tab_view.selectTabViewItemWithIdentifier_(identifier)
+        print(f"sidebar selected {identifier}", flush=True)
+
+    # -- toolbar (M8: unified glass toolbar hosting the search field) ----------
+
+    def toolbarDefaultItemIdentifiers_(self, toolbar):
+        return [NSToolbarFlexibleSpaceItemIdentifier, _SEARCH_ITEM_ID]
+
+    def toolbarAllowedItemIdentifiers_(self, toolbar):
+        return [NSToolbarFlexibleSpaceItemIdentifier, _SEARCH_ITEM_ID]
+
+    def toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar_(
+        self, toolbar, identifier, will_insert
+    ):
+        if str(identifier) != _SEARCH_ITEM_ID:
+            return None
+        item = NSSearchToolbarItem.alloc().initWithItemIdentifier_(
+            _SEARCH_ITEM_ID
+        )
+        field = item.searchField()
+        field.setPlaceholderString_("검색 (질문/응답)")
+        field.setTarget_(self)
+        field.setAction_("searchChanged:")
+        field.setSendsSearchStringImmediately_(True)
+        self.search_field = field
+        return item
 
     # -- build -------------------------------------------------------------------
 
     def _buildWindow(self):
         pane_w, pane_h = pane_min_size()
-        width = max(CONTENT_WIDTH, pane_w + PADDING * 2)
-        height = max(CONTENT_HEIGHT, pane_h + 60)  # 60 ≈ tab chrome
+        width = SIDEBAR_WIDTH + max(CONTENT_WIDTH, pane_w + PADDING * 2)
+        height = max(CONTENT_HEIGHT, pane_h + PADDING)
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, width, height),
             NSWindowStyleMaskTitled
@@ -171,10 +251,51 @@ class MainWindowController(NSObject):
         self.window.setDelegate_(self)  # windowWillClose_ → Accessory policy
         self._applyFloating()
 
+        # M8 glass toolbar — on macOS 26 a unified toolbar gets the Liquid
+        # Glass treatment automatically; it hosts the history search field.
+        toolbar = NSToolbar.alloc().initWithIdentifier_("MacsistToolbar")
+        toolbar.setDelegate_(self)
+        toolbar.setAllowsUserCustomization_(False)
+        self.window.setToolbar_(toolbar)
+        self.window.setToolbarStyle_(NSWindowToolbarStyleUnified)
+
         content = self.window.contentView()
-        self.tab_view = NSTabView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, width, height)
+
+        # M8 translucent sidebar: source-list material + 기록/설정 list
+        self.sidebar_effect = NSVisualEffectView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, SIDEBAR_WIDTH, height)
         )
+        self.sidebar_effect.setMaterial_(NSVisualEffectMaterialSidebar)
+        self.sidebar_effect.setBlendingMode_(
+            NSVisualEffectBlendingModeBehindWindow
+        )
+        self.sidebar_effect.setState_(NSVisualEffectStateActive)
+        content.addSubview_(self.sidebar_effect)
+
+        side_scroll = NSScrollView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, SIDEBAR_WIDTH, height - PADDING)
+        )
+        side_scroll.setDrawsBackground_(False)
+        side_table = NSTableView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, SIDEBAR_WIDTH, height - PADDING)
+        )
+        side_table.setStyle_(NSTableViewStyleSourceList)
+        column = NSTableColumn.alloc().initWithIdentifier_("item")
+        column.setWidth_(SIDEBAR_WIDTH - 20)
+        side_table.addTableColumn_(column)
+        side_table.setHeaderView_(None)
+        side_table.setAllowsMultipleSelection_(False)
+        side_table.setDataSource_(self.sidebar)
+        side_table.setDelegate_(self.sidebar)
+        self.sidebar.table = side_table
+        side_scroll.setDocumentView_(side_table)
+        self.sidebar_effect.addSubview_(side_scroll)
+
+        # tabless tab view fills the area right of the sidebar
+        self.tab_view = NSTabView.alloc().initWithFrame_(
+            NSMakeRect(SIDEBAR_WIDTH, 0, width - SIDEBAR_WIDTH, height)
+        )
+        self.tab_view.setTabViewType_(NSNoTabsNoBorder)
         self.tab_view.setDelegate_(self)
         content.addSubview_(self.tab_view)
 
@@ -199,26 +320,15 @@ class MainWindowController(NSObject):
         size = container.frame().size
         cw, ch = size.width, size.height
 
-        # row 1: search + 항상 위
-        top_y = ch - PADDING - ROW_HEIGHT
+        # top row: save toggles + 항상 위 (M8 — search moved to the toolbar)
+        toggles_y = ch - PADDING - ROW_HEIGHT
         self.floating_checkbox = NSButton.checkboxWithTitle_target_action_(
             "항상 위", self, "toggleFloating:"
         )
         self.floating_checkbox.setFrame_(
-            NSMakeRect(cw - PADDING - 80, top_y, 80, ROW_HEIGHT)
+            NSMakeRect(cw - PADDING - 80, toggles_y, 80, ROW_HEIGHT)
         )
         container.addSubview_(self.floating_checkbox)
-        self.search_field = NSSearchField.alloc().initWithFrame_(
-            NSMakeRect(PADDING, top_y, cw - PADDING * 2 - 80 - 8, ROW_HEIGHT)
-        )
-        self.search_field.setPlaceholderString_("검색 (질문/응답)")
-        self.search_field.setTarget_(self)
-        self.search_field.setAction_("searchChanged:")
-        self.search_field.setSendsSearchStringImmediately_(True)
-        container.addSubview_(self.search_field)
-
-        # row 2: master save toggle + per-mode sub-toggles
-        toggles_y = top_y - ROW_HEIGHT - 4
         self.enabled_checkbox = NSButton.checkboxWithTitle_target_action_(
             "기록 저장 (전체)", self, "toggleEnabled:"
         )

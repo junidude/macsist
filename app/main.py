@@ -6,7 +6,16 @@ Accessory activation policy = LSUIElement equivalent: no Dock icon, menu bar onl
 import os
 import sys
 
-from AppKit import NSApplication, NSApplicationActivationPolicyAccessory, NSWorkspace
+from AppKit import (
+    NSAppearance,
+    NSAppearanceNameAqua,
+    NSAppearanceNameDarkAqua,
+    NSApplication,
+    NSApplicationActivationPolicyAccessory,
+    NSColor,
+    NSColorSpace,
+    NSWorkspace,
+)
 from ApplicationServices import AXIsProcessTrusted, AXIsProcessTrustedWithOptions
 from Foundation import NSObject, NSTimer, NSURL
 from PyObjCTools import AppHelper
@@ -25,6 +34,96 @@ _controller = None
 _explain = None
 _health = None
 _ax_waiter = None
+_ui_auditor = None
+
+
+class _UIAuditor(NSObject):
+    """HE_DEBUG_UI_AUDIT=<sec>: repeating structured dump of the panel and
+    main-window chrome (M8) — this bundle-less app cannot be screenshot, so
+    glass/fade/light-dark verification greps these lines."""
+
+    def audit_(self, timer):
+        try:
+            self._auditPanel()
+            self._auditMainWindow()
+        except Exception as exc:  # an audit must never crash the app
+            print(f"ui-audit error: {exc!r}", flush=True)
+
+    def _resolvedSeparatorRGBA_(self, view):
+        holder = {}
+
+        def _resolve():
+            holder["c"] = NSColor.separatorColor().colorUsingColorSpace_(
+                NSColorSpace.sRGBColorSpace()
+            )
+
+        view.effectiveAppearance().performAsCurrentDrawingAppearance_(_resolve)
+        c = holder["c"]
+        return (
+            f"{c.redComponent():.3f},{c.greenComponent():.3f},"
+            f"{c.blueComponent():.3f},{c.alphaComponent():.3f}"
+        )
+
+    def _auditPanel(self):
+        rp = _explain.panel
+        if rp.panel is None:
+            print("ui-audit panel: not built", flush=True)
+            return
+        from result_panel import _HairlineEffectView
+
+        backdrop = rp._backdrop
+        cls = type(backdrop).__name__
+        if not isinstance(backdrop, _HairlineEffectView):
+            # glass path (hasattr cornerRadius is useless — NSView has a
+            # private accessor of the same name that returns 0)
+            radius = float(backdrop.cornerRadius())
+            border = "n/a"
+            curve = "glass"
+        else:
+            layer = backdrop.layer()
+            radius = float(layer.cornerRadius())
+            border = (
+                f"{float(layer.borderWidth()):g}px "
+                f"rgba({self._resolvedSeparatorRGBA_(backdrop)})"
+            )
+            curve = str(layer.cornerCurve())
+        f = rp.panel.frame()
+        print(
+            f"ui-audit panel: backdrop={cls} radius={radius:g} "
+            f"border={border} curve={curve} "
+            f"alpha={float(rp.panel.alphaValue()):.2f} "
+            f"visible={bool(rp.panel.isVisible())} "
+            f"key={bool(rp.panel.isKeyWindow())} "
+            f"frame=({f.origin.x:.0f},{f.origin.y:.0f},"
+            f"{f.size.width:.0f},{f.size.height:.0f}) "
+            f"appearance={rp.panel.effectiveAppearance().name()}",
+            flush=True,
+        )
+
+    def _auditMainWindow(self):
+        mw = _controller.main_window
+        if mw.window is None:
+            print("ui-audit window: not built", flush=True)
+            return
+        toolbar = mw.window.toolbar()
+        items = (
+            ",".join(str(i.itemIdentifier()) for i in toolbar.items())
+            if toolbar is not None else "none"
+        )
+        sidebar = getattr(mw, "sidebar_effect", None)
+        sidebar_desc = (
+            f"{type(sidebar).__name__} material={int(sidebar.material())}"
+            if sidebar is not None else "none"
+        )
+        print(
+            f"ui-audit window: toolbar=[{items}] "
+            f"toolbarStyle={int(mw.window.toolbarStyle())} "
+            f"sidebar={sidebar_desc} "
+            f"tabType={int(mw.tab_view.tabViewType())} "
+            f"visible={bool(mw.window.isVisible())} "
+            f"appearance={mw.window.effectiveAppearance().name()}",
+            flush=True,
+        )
 
 
 class _AXGrantWaiter(NSObject):
@@ -46,9 +145,17 @@ class _AXGrantWaiter(NSObject):
 
 
 def main():
-    global _controller, _explain, _health, _ax_waiter
+    global _controller, _explain, _health, _ax_waiter, _ui_auditor
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    # M8 verification: pin the appearance so light/dark runs are reproducible
+    forced = os.environ.get("HE_DEBUG_FORCE_APPEARANCE")
+    if forced in ("light", "dark"):
+        app.setAppearance_(NSAppearance.appearanceNamed_(
+            NSAppearanceNameDarkAqua if forced == "dark"
+            else NSAppearanceNameAqua
+        ))
+        print(f"HE_DEBUG_FORCE_APPEARANCE={forced}", flush=True)
     if not AXIsProcessTrusted():
         # Without Accessibility the hotkey tap receives nothing, so the user
         # could never reach the in-panel permission message — prompt up front
@@ -81,6 +188,13 @@ def main():
     main_window.on_reask = _explain.resubmit_text
     main_window.on_reask_image = _explain.resubmit_image
     _explain.on_open_history = main_window.toggleHistory
+    audit = os.environ.get("HE_DEBUG_UI_AUDIT")
+    if audit:
+        _ui_auditor = _UIAuditor.alloc().init()
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            float(audit), _ui_auditor, "audit:", None, True
+        )
+        print(f"HE_DEBUG_UI_AUDIT: every {audit}s", flush=True)
     print("Macsist started (menu bar). Config:", str(config.get("server_base_url")))
     AppHelper.runEventLoop()
 

@@ -149,6 +149,12 @@ M6 click-to-focus, which lives in the local monitor), `HE_DEBUG_FRAME`,
 programmatically) + `HE_DEBUG_FOLLOWUP_TEXT` (its question),
 `HE_DEBUG_FOLLOWUP_KEYCYCLE` (seconds — focus the input, log key/first-responder
 state, unfocus, log handback state).
+M8: `HE_DEBUG_DISMISS_AFTER` (comma-separated seconds — call `panel.dismiss()`,
+fade-out verification), `HE_DEBUG_FORCE_APPEARANCE=light|dark` (pin NSApp
+appearance for reproducible light/dark runs), `HE_DEBUG_UI_AUDIT=<sec>`
+(repeating structured `ui-audit panel:`/`ui-audit window:` lines — backdrop
+class, cornerRadius, border RGBA, alpha, visible/key, toolbar items, sidebar
+material, tab type).
 
 ---
 
@@ -258,14 +264,26 @@ typing without activating our app; the source app keeps visual focus).
   shipped in the settings window; M7 only relocates it).
 - The menu bar menu gains: History/Settings 열기, server status line (M5).
 
-### 5.3 Glass UI (M8)
+### 5.3 Glass UI (M8) — shipped
 - Adopt the macOS 26 **Liquid Glass** look: `NSGlassEffectView` where available
-  (PyObjC `objc.lookUpClass` guard), falling back to `NSVisualEffectView`
-  (`.hudWindow` material) — the panel already uses the latter.
-- Panel: continuous-corner radius (16pt), thin 1px `separatorColor` border,
-  SF Pro text (13pt body), subtle shadow, fade-in/out (`NSAnimationContext`,
-  150ms), auto-height up to `panel_height` before scrolling.
-- History window: translucent sidebar (source-list material), glass toolbar.
+  (PyObjC `objc.lookUpClass` guard — only resolves after AppKit is imported),
+  falling back to `NSVisualEffectView` (`.hudWindow` material). Config
+  `glass_enabled` is the kill-switch. Glass path: content lives in a wrapper
+  NSView handed to `setContentView_` (never addSubview on the glass directly).
+- Panel: continuous-corner radius (16pt, `panel_corner_radius`); thin 1px
+  `separatorColor` border **on the fallback only** — Liquid Glass draws its
+  own rim highlight, a CALayer border would fight it (border color re-resolved
+  in `viewDidChangeEffectiveAppearance`); SF Pro text (13pt body); shadow;
+  fade-in/out (`NSAnimationContext`, `panel_fade_duration` 150ms — but a
+  key-window dismiss stays instant: `orderOut_` is what hands the keyboard
+  back, and `_unfocusInput`/`_resetSessionUI` flips never animate); auto-height
+  from `panel_min_height` up to `panel_height` (`panel_height_expanded` once a
+  follow-up starts) before scrolling — grow-only, top edge fixed.
+- History window: translucent sidebar (`NSVisualEffectMaterialSidebar` +
+  source-list table 기록/설정 driving a tabless NSTabView), unified glass
+  toolbar hosting the search field (`NSSearchToolbarItem`). Deliberately NOT
+  full-size-content: a plain titled window keeps all fixed-frame layout below
+  the toolbar.
 - All chrome respects light/dark via semantic colors (`labelColor` etc. — never
   hardcoded RGB).
 
@@ -374,9 +392,27 @@ memory `verify-ui-without-screenshots`).
   Regular-policy switch while the window is open (harness-verified both
   directions) + ⌘⇧H global toggle hotkey (recordable; registered binding seen
   in the listener log).
-- **M8 — Glass UI** (§5.3).
+- **M8 — Glass UI** (§5.3). **DONE (2026-06-12).**
   *AC:* panel + history window render with glass material, rounded corners,
   fade animations, correct light/dark; no regression in never-steal-focus.
+  *AC verified (HE_DEBUG runs + ui-audit):* panel backdrop=NSGlassEffectView
+  radius 16 (fallback `_HairlineEffectView` borderWidth 1, cornerCurve
+  continuous when `glass_enabled:false`); fade-in/out logs in order, dismiss
+  fade leaves alpha restored + invisible, re-present 50 ms into a fade-out
+  cancels the pending orderOut (generation token); auto-height grew 120→172
+  on a real stream and a follow-up raised the cap and stopped exactly at 420
+  (`panel_height_expanded`), top edge fixed (y+h constant), no decreasing
+  heights; forced light/dark runs resolved separatorColor to different RGBA
+  (0.902 vs 0.137 grey) with matching appearance names; M6 keycycle rerun —
+  `input focused, key = True` / `input unfocused, key = False`, panel never
+  key during streaming; window audit: toolbar=[flexspace, search]
+  style=unified(3), sidebar NSVisualEffectView material=Sidebar(7),
+  tabType=NoTabsNoBorder(6); window harness: toolbar search filters
+  (25→2 rows), sidebar swaps panes + refreshes settings, row-select detail
+  + copy enable intact; OPEN_HISTORY/OPEN_SETTINGS/WIN_ORIGIN hooks
+  unchanged. Deployed; visual glass appearance awaiting the user's eyeball
+  check (programmatic checks can't see pixels — memory
+  `verify-ui-without-screenshots`).
 - **M9 — External providers** (§5.4).
   *AC:* add an OpenRouter (or OpenAI) provider with a key → explain works with
   the local server stopped; key lives in Keychain; switching back needs no

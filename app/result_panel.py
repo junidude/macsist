@@ -17,6 +17,7 @@ All methods are main-thread only (callers marshal via AppHelper.callAfter).
 
 import objc
 from AppKit import (
+    NSAnimationContext,
     NSBackingStoreBuffered,
     NSColor,
     NSEvent,
@@ -35,6 +36,7 @@ from AppKit import (
     NSTextField,
     NSTextFieldRoundedBezel,
     NSTextView,
+    NSView,
     NSViewHeightSizable,
     NSViewMaxYMargin,
     NSViewWidthSizable,
@@ -57,6 +59,19 @@ from Foundation import (
 )
 from PyObjCTools import AppHelper
 
+# macOS 26 Liquid Glass (M8). lookUpClass only works after AppKit is loaded,
+# which the imports above guarantee; older systems fall back to the
+# NSVisualEffectView path below.
+try:
+    _GlassEffectView = objc.lookUpClass("NSGlassEffectView")
+except objc.error:
+    _GlassEffectView = None
+
+try:
+    from Quartz import kCACornerCurveContinuous as _CORNER_CONTINUOUS
+except ImportError:
+    _CORNER_CONTINUOUS = "continuous"
+
 _ESC_KEYCODE = 53
 _PADDING = 10.0
 _INPUT_HEIGHT = 26.0
@@ -72,6 +87,21 @@ class _NonActivatingPanel(NSPanel):
 
     def canBecomeMainWindow(self):
         return False
+
+
+class _HairlineEffectView(NSVisualEffectView):
+    """Fallback backdrop: hudWindow material with a 1px separatorColor border.
+    Semantic colors resolve to a concrete CGColor at assignment time, so the
+    border must be re-resolved whenever the effective appearance flips."""
+
+    def viewDidChangeEffectiveAppearance(self):
+        objc.super(_HairlineEffectView, self).viewDidChangeEffectiveAppearance()
+        self.refreshBorderColor()
+
+    def refreshBorderColor(self):
+        def _apply():
+            self.layer().setBorderColor_(NSColor.separatorColor().CGColor())
+        self.effectiveAppearance().performAsCurrentDrawingAppearance_(_apply)
 
 
 class _FollowUpField(NSTextField):
@@ -96,6 +126,9 @@ class ResultPanelController(NSObject):
         self._followup_mode = False
         self._expanded = False
         self._scroll = None
+        self._backdrop = None
+        self._fade_gen = 0  # cancels a pending fade-out orderOut on re-show
+        self._height_capped = False  # auto-height hit the cap (short-circuit)
         self._global_monitor = None
         self._local_monitor = None
         self._text_attrs = None
@@ -122,6 +155,7 @@ class ResultPanelController(NSObject):
                 chunk, self._text_attrs
             )
         )
+        self._recomputeHeight()
         self.text_view.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
 
     def showThinking_(self, char_count):
@@ -155,6 +189,7 @@ class ResultPanelController(NSObject):
             )
         else:
             self._setText_attrs_(message, self._message_attrs)
+        self._recomputeHeight()
         print("panel message:", message, flush=True)
 
     def finishStream(self):
@@ -176,6 +211,7 @@ class ResultPanelController(NSObject):
             NSMakeRect(frame.origin.x, bottom, frame.size.width, top - bottom)
         )
         self.input_field.setHidden_(False)
+        self._recomputeHeight()  # input row adds to the needed height
         print("follow-up input shown", flush=True)
 
     def beginFollowUp_(self, question):
@@ -197,6 +233,7 @@ class ResultPanelController(NSObject):
             )
         )
         self._placeholder = True
+        self._recomputeHeight()
         self.text_view.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
 
     def inputAction_(self, sender):
@@ -209,23 +246,48 @@ class ResultPanelController(NSObject):
             self.on_followup(text)
 
     def dismiss(self):
-        """User-initiated dismiss (Esc / click-away) — also stops the stream."""
+        """User-initiated dismiss (Esc / click-away) — also stops the stream.
+        M8: fades out over panel_fade_duration, EXCEPT while the panel is key —
+        orderOut_ is what hands the keyboard back to the source app, so a
+        key-window dismiss must stay instant (never-steal-focus invariant)."""
         self._remove_monitors()
-        if self.panel is not None:
+        if self.panel is not None and self.panel.isVisible():
             if self.panel.isKeyWindow():
                 self.panel.makeFirstResponder_(None)
+                self.panel._allow_key = False
+                self.panel.orderOut_(None)  # hands key back to the source app
+            else:
+                self.panel._allow_key = False
+                self._fadeOut()
+            print("panel dismissed", flush=True)
+        elif self.panel is not None:
             self.panel._allow_key = False
-            if self.panel.isVisible():
-                self.panel.orderOut_(None)  # also hands key back to the source app
-                print("panel dismissed", flush=True)
         if self.on_dismiss is not None:
             self.on_dismiss()
+
+    def _fadeOut(self):
+        self._fade_gen += 1
+        token = self._fade_gen
+
+        def _animate(context):
+            context.setDuration_(float(self.config.get("panel_fade_duration")))
+            self.panel.animator().setAlphaValue_(0.0)
+
+        def _done():
+            if token != self._fade_gen:
+                return  # re-shown mid-fade: _presentAt_ already restored alpha
+            self.panel.orderOut_(None)
+            self.panel.setAlphaValue_(1.0)  # orderOut/orderFront flips elsewhere
+            print("panel fade-out done -> orderOut", flush=True)
+
+        NSAnimationContext.runAnimationGroup_completionHandler_(_animate, _done)
 
     # -- panel construction --------------------------------------------------
 
     def _buildPanel(self):
         width = float(self.config.get("panel_width"))
-        height = float(self.config.get("panel_height"))
+        # M8 auto-height: start minimal, grow to fit up to panel_height
+        height = float(self.config.get("panel_min_height"))
         panel = _NonActivatingPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, width, height),
             NSWindowStyleMaskNonactivatingPanel | NSWindowStyleMaskBorderless,
@@ -247,16 +309,9 @@ class ResultPanelController(NSObject):
         # defense-in-depth only — the local monitor drives focus explicitly
         panel.setBecomesKeyOnlyIfNeeded_(True)
 
-        effect = NSVisualEffectView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, width, height)
+        content_host = self._buildBackdropForPanel_width_height_(
+            panel, width, height
         )
-        effect.setMaterial_(NSVisualEffectMaterialHUDWindow)
-        effect.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
-        effect.setState_(NSVisualEffectStateActive)
-        effect.setWantsLayer_(True)
-        effect.layer().setCornerRadius_(10.0)
-        effect.layer().setMasksToBounds_(True)
-        panel.setContentView_(effect)
 
         scroll = NSTextView.scrollableTextView()
         scroll.setFrame_(
@@ -266,7 +321,7 @@ class ResultPanelController(NSObject):
         )
         scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         scroll.setDrawsBackground_(False)
-        effect.addSubview_(scroll)
+        content_host.addSubview_(scroll)
 
         text_view = scroll.documentView()
         text_view.setEditable_(False)
@@ -288,7 +343,7 @@ class ResultPanelController(NSObject):
         field.cell().setSendsActionOnEndEditing_(False)
         field.setAutoresizingMask_(NSViewWidthSizable | NSViewMaxYMargin)
         field.setHidden_(True)
-        effect.addSubview_(field)
+        content_host.addSubview_(field)
 
         self._text_attrs = {
             NSFontAttributeName: NSFont.systemFontOfSize_(13.0),
@@ -307,6 +362,48 @@ class ResultPanelController(NSObject):
         self.input_field = field
         self._scroll = scroll
 
+    def _buildBackdropForPanel_width_height_(self, panel, width, height):
+        """Liquid Glass backdrop when available (M8), NSVisualEffectView
+        otherwise. Returns the view that hosts the panel's content — for the
+        glass path that is a plain wrapper handed to setContentView_ (glass
+        manages its content view; subviews must not go on the glass directly).
+        The 1px hairline is fallback-only: glass draws its own rim highlight."""
+        radius = float(self.config.get("panel_corner_radius"))
+        use_glass = bool(self.config.get("glass_enabled")) and (
+            _GlassEffectView is not None
+        )
+        frame = NSMakeRect(0, 0, width, height)
+        if use_glass:
+            glass = _GlassEffectView.alloc().initWithFrame_(frame)
+            glass.setCornerRadius_(radius)
+            wrapper = NSView.alloc().initWithFrame_(frame)
+            wrapper.setAutoresizingMask_(
+                NSViewWidthSizable | NSViewHeightSizable
+            )
+            glass.setContentView_(wrapper)
+            panel.setContentView_(glass)
+            backdrop, content_host = glass, wrapper
+        else:
+            effect = _HairlineEffectView.alloc().initWithFrame_(frame)
+            effect.setMaterial_(NSVisualEffectMaterialHUDWindow)
+            effect.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
+            effect.setState_(NSVisualEffectStateActive)
+            effect.setWantsLayer_(True)
+            effect.layer().setCornerRadius_(radius)
+            effect.layer().setCornerCurve_(_CORNER_CONTINUOUS)
+            effect.layer().setMasksToBounds_(True)
+            effect.layer().setBorderWidth_(1.0)
+            effect.refreshBorderColor()
+            panel.setContentView_(effect)
+            backdrop, content_host = effect, effect
+        self._backdrop = backdrop
+        print(
+            f"panel backdrop={type(backdrop).__name__} "
+            f"radius={radius:g} glass={use_glass}",
+            flush=True,
+        )
+        return content_host
+
     # -- presentation ---------------------------------------------------------
 
     def _presentAt_(self, cursor_tl):
@@ -317,6 +414,10 @@ class ResultPanelController(NSObject):
         the in-flight stream, which would kill the request being presented."""
         if self.panel is None:
             self._buildPanel()
+        # visibility check MUST precede _resetSessionUI (it orderOuts when key)
+        was_visible = bool(self.panel.isVisible())
+        self._fade_gen += 1  # cancel any pending fade-out orderOut
+        self.panel.setAlphaValue_(1.0)
         self._resetSessionUI()  # new session: input/key/size back to defaults
         x, y_tl = cursor_tl
         # AppKit's global coordinate space is bottom-left-origin, flipped
@@ -334,13 +435,36 @@ class ResultPanelController(NSObject):
         ox = max(vf.origin.x, min(ox, vf.origin.x + vf.size.width - size.width))
         oy = max(vf.origin.y, min(oy, vf.origin.y + vf.size.height - size.height))
         self.panel.setFrameOrigin_(NSMakePoint(ox, oy))
-        self.panel.orderFrontRegardless()  # never makeKeyAndOrderFront
+        if was_visible:
+            self.panel.orderFrontRegardless()  # never makeKeyAndOrderFront
+        else:
+            self._fadeIn()
         self._install_monitors()
         print(
             f"panel shown at ({ox:.0f},{oy:.0f}) "
             f"size=({size.width:.0f}x{size.height:.0f})",
             flush=True,
         )
+
+    def _fadeIn(self):
+        """First presentation: 0 → 1 alpha over panel_fade_duration (M8).
+        Only the show path animates — the orderOut/orderFront key-handback
+        flips in _unfocusInput/_resetSessionUI must stay instant."""
+        self._fade_gen += 1
+        token = self._fade_gen
+        self.panel.setAlphaValue_(0.0)
+        self.panel.orderFrontRegardless()  # never makeKeyAndOrderFront
+
+        def _animate(context):
+            context.setDuration_(float(self.config.get("panel_fade_duration")))
+            self.panel.animator().setAlphaValue_(1.0)
+
+        def _done():
+            if token == self._fade_gen:
+                self.panel.setAlphaValue_(1.0)
+                print("panel fade-in done", flush=True)
+
+        NSAnimationContext.runAnimationGroup_completionHandler_(_animate, _done)
 
     def _screenForPoint_(self, point):
         for screen in NSScreen.screens():
@@ -403,7 +527,7 @@ class ResultPanelController(NSObject):
         self.input_field.setStringValue_("")
         self.input_field.setHidden_(True)
         width = float(self.config.get("panel_width"))
-        height = float(self.config.get("panel_height"))
+        height = float(self.config.get("panel_min_height"))
         frame = self.panel.frame()
         if frame.size.width != width or frame.size.height != height:
             self.panel.setFrame_display_(
@@ -422,28 +546,56 @@ class ResultPanelController(NSObject):
         )
         self._followup_mode = False
         self._expanded = False
+        self._height_capped = False
         self._ph_start = 0
 
     def _growToExpanded(self):
-        """Grow to panel_height_expanded keeping the top edge; clamp into the
-        screen's visible frame (§5.1)."""
+        """First follow-up: raise the auto-height cap to panel_height_expanded
+        (§5.1) — the streamed answer then grows the panel to fit (M8), so this
+        never jumps to a mostly-empty tall panel."""
         self._expanded = True
-        new_h = float(self.config.get("panel_height_expanded"))
-        frame = self.panel.frame()
-        if new_h <= frame.size.height:
+        self._height_capped = False
+        cap = float(self.config.get("panel_height_expanded"))
+        self._recomputeHeight()
+        print(f"panel expanded to cap {cap:.0f}", flush=True)
+
+    def _recomputeHeight(self):
+        """Auto-height (M8): grow the panel to fit the transcript — top edge
+        fixed (the panel hangs below the cursor), clamped to the screen's
+        visible frame, capped at panel_height (panel_height_expanded once a
+        follow-up session started). Grow-only; never shrinks mid-session.
+        Once the cap is reached this short-circuits, so the per-token layout
+        measurement stops for the rest of the stream."""
+        if self.panel is None or self._height_capped:
             return
+        lm = self.text_view.layoutManager()
+        tc = self.text_view.textContainer()
+        lm.ensureLayoutForTextContainer_(tc)
+        used = lm.usedRectForTextContainer_(tc)
+        inset = self.text_view.textContainerInset()
+        needed = used.size.height + 2 * inset.height + 2 * _PADDING
+        if self.input_field is not None and not self.input_field.isHidden():
+            needed += _INPUT_HEIGHT + _INPUT_GAP
+        cap = float(
+            self.config.get(
+                "panel_height_expanded" if self._expanded else "panel_height"
+            )
+        )
+        frame = self.panel.frame()
+        top = frame.origin.y + frame.size.height
         screen = self.panel.screen() or NSScreen.mainScreen()
         vf = screen.visibleFrame()
-        oy = frame.origin.y + frame.size.height - new_h
-        ox = max(
-            vf.origin.x,
-            min(frame.origin.x, vf.origin.x + vf.size.width - frame.size.width),
+        limit = min(cap, top - vf.origin.y)  # top edge genuinely never moves
+        if needed >= limit:
+            self._height_capped = True
+        new_h = min(needed, limit)
+        if new_h <= frame.size.height:
+            return
+        self.panel.setFrame_display_(
+            NSMakeRect(frame.origin.x, top - new_h, frame.size.width, new_h),
+            True,
         )
-        oy = max(vf.origin.y, min(oy, vf.origin.y + vf.size.height - new_h))
-        self.panel.setFrame_display_animate_(
-            NSMakeRect(ox, oy, frame.size.width, new_h), True, True
-        )
-        print(f"panel expanded to {new_h:.0f}", flush=True)
+        print(f"panel height -> {new_h:.0f}", flush=True)
 
     def _isInputDescendant_(self, view):
         # the field editor lives inside the field's view tree while editing

@@ -87,10 +87,18 @@ DEFAULTS = {
     "capture_modifier_release_timeout": 0.3,
     "capture_max_chars": 4000,
     "panel_width": 420.0,
+    # M8: 패널은 panel_min_height에서 시작해 내용에 맞춰 panel_height까지
+    # 자라고(auto-height), 그 뒤로는 스크롤된다.
     "panel_height": 260.0,
+    "panel_min_height": 120.0,
     # follow-up 세션이 시작되면(첫 질문 제출) 패널이 이 높이로 커진다 (M6)
     "panel_height_expanded": 420.0,
     "panel_cursor_offset": 12.0,
+    # M8 glass UI: NSGlassEffectView 사용 여부 (False면 NSVisualEffectView
+    # hudWindow 폴백 — Liquid Glass가 문제를 일으킬 때의 킬스위치)
+    "glass_enabled": True,
+    "panel_corner_radius": 16.0,
+    "panel_fade_duration": 0.15,
     # follow-up 대화 깊이: 원래 질문/답 + N개의 추가 질문/답 쌍, 오래된 쌍부터 삭제
     "followup_max_turns": 5,
     # M7 history: JSONL at CONFIG_DIR/history.jsonl, pruned by file rewrite.

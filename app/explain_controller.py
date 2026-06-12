@@ -137,6 +137,17 @@ class ExplainController:
                     timer.daemon = True
                     timer.start()
                 print(f"{env}: firing at {delays}s", flush=True)
+        # M8 hook: dismiss the panel programmatically (fade-out verification)
+        delays = os.environ.get("HE_DEBUG_DISMISS_AFTER")
+        if delays:
+            for delay in delays.split(","):
+                timer = threading.Timer(
+                    float(delay),
+                    lambda: AppHelper.callAfter(self.panel.dismiss),
+                )
+                timer.daemon = True
+                timer.start()
+            print(f"HE_DEBUG_DISMISS_AFTER: firing at {delays}s", flush=True)
         # M6 hooks: submit a follow-up / exercise the key-window cycle
         # programmatically (submitFollowUp is main-thread-only → callAfter)
         delays = os.environ.get("HE_DEBUG_FOLLOWUP_AFTER")
