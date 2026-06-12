@@ -270,22 +270,44 @@ typing without activating our app; the source app keeps visual focus).
   falling back to `NSVisualEffectView` (`.hudWindow` material). Config
   `glass_enabled` is the kill-switch. Glass path: content lives in a wrapper
   NSView handed to `setContentView_` (never addSubview on the glass directly).
-- Panel: continuous-corner radius (16pt, `panel_corner_radius`); thin 1px
-  `separatorColor` border **on the fallback only** — Liquid Glass draws its
-  own rim highlight, a CALayer border would fight it (border color re-resolved
-  in `viewDidChangeEffectiveAppearance`); SF Pro text (13pt body); shadow;
-  fade-in/out (`NSAnimationContext`, `panel_fade_duration` 150ms — but a
-  key-window dismiss stays instant: `orderOut_` is what hands the keyboard
-  back, and `_unfocusInput`/`_resetSessionUI` flips never animate); auto-height
+- Panel: continuous-corner radius (`panel_corner_radius`, 26pt Spotlight-like);
+  thin 1px `separatorColor` border **on the fallback only** — Liquid Glass
+  draws its own rim highlight, a CALayer border would fight it (border color
+  re-resolved in `viewDidChangeEffectiveAppearance`); SF Pro text
+  (`panel_font_size`, 15pt); shadow; fade-in/out (`NSAnimationContext`,
+  `panel_fade_duration` 150ms — but a key-window dismiss stays instant:
+  `orderOut_` is what hands the keyboard back, and
+  `_unfocusInput`/`_resetSessionUI` flips never animate); auto-height
   from `panel_min_height` up to `panel_height` (`panel_height_expanded` once a
-  follow-up starts) before scrolling — grow-only, top edge fixed.
-- History window: translucent sidebar (`NSVisualEffectMaterialSidebar` +
-  source-list table 기록/설정 driving a tabless NSTabView), unified glass
-  toolbar hosting the search field (`NSSearchToolbarItem`). Deliberately NOT
-  full-size-content: a plain titled window keeps all fixed-frame layout below
-  the toolbar.
+  follow-up starts) before scrolling — grow-only, top edge fixed. Region mode
+  centers the panel on the captured selection's midpoint (drag tracked via
+  read-only HID polling during `screencapture -i`; window-mode/click falls
+  back to the cursor). Settings saves mark the panel dirty → rebuilt at the
+  next session start (never mid-stream).
+- Main window (user-directed chatbot redesign, several polish rounds):
+  full-size-content titled window, non-opaque, body = frosted glass sheet
+  (`glass_style` regular/clear + `glass_window_tint_alpha`) with 26pt rounded
+  corners (edges genuinely transparent); floating glass **sidebar island**
+  (SF-Symbol items 기록/설정 with self-drawn accent selection pills — the
+  system source-list capsule re-tiled rows and wobbled — plus NSSwitch
+  toggles for history saving / 항상 위); unified icon-only glass toolbar
+  hosting the search field (`NSSearchToolbarItem`). History pane = chat
+  transcript (user bubbles right/accent via NSBox — `contentViewMargins`
+  must be zeroed and heights measured with `cellSizeForBounds`, or labels
+  clip — AI bubbles left), sessions = rounded card list on the right
+  (a session = text/region record + its follow-ups). Settings pane =
+  Codex-style scrollable sections of card rows (연결/응답/단축키/모양/고급)
+  with rounded borderless input fields (`ui_kit.make_round_field`) and pill
+  buttons (`ui_kit.PillButton`, hover tint). 모양 section edits
+  panel font/width/height + glass style live. ⌘W closes (keyCode 13 in
+  `performKeyEquivalent_` — no main menu in an Accessory app); first open
+  is screen-centered.
+- Icons (`app/assets/`, copied by deploy.sh): menu-bar template PDF (18pt,
+  healthy state only — loading/down keep the SF-Symbol alert bubbles, M5 AC)
+  and `macsist.icns` Dock icon via `setApplicationIconImage_`.
 - All chrome respects light/dark via semantic colors (`labelColor` etc. — never
-  hardcoded RGB).
+  hardcoded RGB); layer-color users re-resolve in
+  `viewDidChangeEffectiveAppearance`, NSBox fills re-resolve natively.
 
 ### 5.4 External API providers (M9)
 For users whose machines can't host a local LLM.
@@ -410,9 +432,22 @@ memory `verify-ui-without-screenshots`).
   tabType=NoTabsNoBorder(6); window harness: toolbar search filters
   (25→2 rows), sidebar swaps panes + refreshes settings, row-select detail
   + copy enable intact; OPEN_HISTORY/OPEN_SETTINGS/WIN_ORIGIN hooks
-  unchanged. Deployed; visual glass appearance awaiting the user's eyeball
-  check (programmatic checks can't see pixels — memory
-  `verify-ui-without-screenshots`).
+  unchanged. Deployed; user eyeballed the live windows across the polish
+  rounds below.
+  *M8.1 polish (2026-06-12, user-directed iterations, all verified by harness
+  + user screenshots):* chatbot main-window redesign (chat bubbles + session
+  cards + sidebar switches, §5.3); frosted glass sheet body with 26pt
+  transparent edges after a too-clear round (`glass_style` superseded
+  clear→regular, `glass_window_tint_alpha`); boxes ×1.3 / fonts ×1.15
+  (`panel_*` superseded-default migration since old defaults were pinned in
+  config.json); Codex-style Settings sections incl. 모양 (panel font/size +
+  glass style, live via `panel.markDirty()` rebuild-on-next-session); ⌘W
+  close; window first-open centered; region panel centered on the captured
+  selection (pixel-exact in e2e: rect (600,300,400,300) → panel center
+  (800,450)); custom icons (menu bar template PDF + Dock icns); bubble
+  pixel-verification harness (offscreen `cacheDisplayInRect` — white text
+  pixels counted on the accent bubble) caught the NSBox
+  `contentViewMargins`/`cellSizeForBounds` clipping bugs.
 - **M9 — External providers** (§5.4).
   *AC:* add an OpenRouter (or OpenAI) provider with a key → explain works with
   the local server stopped; key lives in Keychain; switching back needs no

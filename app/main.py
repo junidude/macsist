@@ -4,6 +4,7 @@ Accessory activation policy = LSUIElement equivalent: no Dock icon, menu bar onl
 """
 
 import os
+import pathlib
 import sys
 
 from AppKit import (
@@ -110,11 +111,20 @@ class _UIAuditor(NSObject):
             ",".join(str(i.itemIdentifier()) for i in toolbar.items())
             if toolbar is not None else "none"
         )
+        from AppKit import NSVisualEffectView
+
         sidebar = getattr(mw, "sidebar_effect", None)
-        sidebar_desc = (
-            f"{type(sidebar).__name__} material={int(sidebar.material())}"
-            if sidebar is not None else "none"
-        )
+        if sidebar is None:
+            sidebar_desc = "none"
+        elif isinstance(sidebar, NSVisualEffectView):
+            sidebar_desc = (
+                f"{type(sidebar).__name__} material={int(sidebar.material())}"
+            )
+        else:  # glass island
+            sidebar_desc = (
+                f"{type(sidebar).__name__} "
+                f"radius={float(sidebar.cornerRadius()):g}"
+            )
         print(
             f"ui-audit window: toolbar=[{items}] "
             f"toolbarStyle={int(mw.window.toolbarStyle())} "
@@ -148,6 +158,15 @@ def main():
     global _controller, _explain, _health, _ax_waiter, _ui_auditor
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    # Dock icon (user asset) — shown while the History window has the app in
+    # Regular policy; a bundle-less python process has no Info.plist icon.
+    icns = pathlib.Path(__file__).parent / "assets" / "macsist.icns"
+    if icns.exists():
+        from AppKit import NSImage
+        icon = NSImage.alloc().initWithContentsOfFile_(str(icns))
+        if icon is not None:
+            app.setApplicationIconImage_(icon)
+            print("dock icon set:", icns.name, flush=True)
     # M8 verification: pin the appearance so light/dark runs are reproducible
     forced = os.environ.get("HE_DEBUG_FORCE_APPEARANCE")
     if forced in ("light", "dark"):
@@ -183,7 +202,12 @@ def main():
     _health.start()
     _explain.start()
     main_window = _controller.main_window
-    main_window.settings.on_saved = _explain.reloadHotkeys
+
+    def _settings_saved():
+        _explain.reloadHotkeys()
+        panel.markDirty()  # panel size/font/glass apply on the next session
+
+    main_window.settings.on_saved = _settings_saved
     main_window.settings.on_record_changed = _explain.pauseHotkeys_
     main_window.on_reask = _explain.resubmit_text
     main_window.on_reask_image = _explain.resubmit_image

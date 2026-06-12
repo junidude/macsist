@@ -14,12 +14,24 @@ import os
 import struct
 import subprocess
 import tempfile
+import time
+
+from Quartz import (
+    CGEventCreate,
+    CGEventGetLocation,
+    CGEventSourceButtonState,
+    kCGEventSourceStateCombinedSessionState,
+    kCGMouseButtonLeft,
+)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def capture_region(config, proc_holder=None, debug_rect=None):
-    """Run the interactive selection; return PNG bytes or None (silent no-op).
+    """Run the interactive selection; return (png_bytes, region_center) —
+    (None, None) on cancel. region_center is the selection midpoint in CG
+    top-left global coords (the panel gets centered on it, M8 polish), or
+    None when the drag couldn't be observed (window mode, plain click).
 
     debug_rect: "x,y,w,h" → non-interactive `screencapture -R` (verification
     hook — the interactive overlay can't be driven synthetically).
@@ -37,17 +49,44 @@ def capture_region(config, proc_holder=None, debug_rect=None):
             # are no-ops, so a stale reference is benign and clearing would
             # race the next capture's publish
             proc_holder(proc)
+        if debug_rect:
+            x, y, w, h = (float(v) for v in debug_rect.split(","))
+            center = (x + w / 2.0, y + h / 2.0)
+        else:
+            center = _track_selection_center(proc)
         returncode = proc.wait()
         if returncode != 0 or not os.path.exists(path) or os.path.getsize(path) == 0:
-            return None
+            return None, None
         data = _read_downscaled(path, int(config.get("region_max_dim")))
-        print(f"region captured: {len(data)} bytes", flush=True)
-        return data
+        print(f"region captured: {len(data)} bytes center={center}", flush=True)
+        return data, center
     finally:
         try:
             os.remove(path)
         except OSError:
             pass
+
+
+def _track_selection_center(proc):
+    """Poll the mouse while `screencapture -i` runs: the first and last
+    points sampled with the left button held are the drag corners, so their
+    midpoint is the selected region's center. Read-only HID state polling —
+    no new pynput listener (hard rule #2). Returns None when no real drag
+    happened (spacebar window mode / plain click)."""
+    first = last = None
+    while proc.poll() is None:
+        if CGEventSourceButtonState(
+            kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft
+        ):
+            loc = CGEventGetLocation(CGEventCreate(None))
+            if first is None:
+                first = (loc.x, loc.y)
+            last = (loc.x, loc.y)
+        time.sleep(0.03)
+    if (first is not None
+            and (abs(first[0] - last[0]) > 4 or abs(first[1] - last[1]) > 4)):
+        return ((first[0] + last[0]) / 2.0, (first[1] + last[1]) / 2.0)
+    return None
 
 
 def png_dimensions(data):
@@ -91,11 +130,12 @@ def _main():
     )
     args = parser.parse_args()
 
-    data = capture_region(ConfigStore(), debug_rect=args.rect)
+    data, center = capture_region(ConfigStore(), debug_rect=args.rect)
     if data is None:
         print("(취소 또는 캡처 실패 — no-op)", flush=True)
     else:
-        print(f"captured {len(data)} bytes, dims={png_dimensions(data)}", flush=True)
+        print(f"captured {len(data)} bytes, dims={png_dimensions(data)}, "
+              f"center={center}", flush=True)
 
 
 if __name__ == "__main__":

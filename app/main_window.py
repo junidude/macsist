@@ -1,14 +1,15 @@
 """MainWindowController — the History/Settings window (M7, M8 glass chrome).
 
 A regular activating window (the never-steal-focus invariant applies only to
-the result panel; the old standalone settings window already activated the
-app the same way). M8: a translucent source-list sidebar (기록/설정) drives a
-tabless NSTabView, and the search field lives in a unified glass toolbar.
+the result panel). M8 chatbot redesign (user-directed):
 
-- History: master-detail over history.jsonl — newest-first table, full Q/A
-  text below with 복사 / 다시 질문 buttons. Chosen over inline row expansion
-  deliberately: this bundle-less app cannot be verified by screenshots, so
-  the layout must stay fixed-frame simple.
+- the window body is a clear Liquid Glass sheet (desktop shows through),
+  with a floating glass sidebar island (기록/설정 source list + NSSwitch
+  toggles for the history-save settings and 항상 위);
+- History pane = AI-chatbot layout: chat transcript in the middle (user
+  questions right-aligned, AI answers left-aligned, bubble style) and a
+  session list on the right (snippet + datetime cards). A session is one
+  original text/region request plus its follow-up records.
 - Settings: the SettingsPaneController controls (M0–M6 logic unchanged),
   built into this window's pane via buildInView_.
 
@@ -16,6 +17,7 @@ Owned by StatusItemController (one instance, setReleasedWhenClosed_(False)).
 All methods run on the main thread.
 """
 
+import math
 import os
 
 import objc
@@ -24,9 +26,19 @@ from AppKit import (
     NSApplicationActivationPolicyAccessory,
     NSApplicationActivationPolicyRegular,
     NSBackingStoreBuffered,
+    NSBox,
+    NSBoxCustom,
     NSButton,
+    NSColor,
+    NSEventModifierFlagCommand,
     NSFloatingWindowLevel,
+    NSFocusRingTypeNone,
     NSFont,
+    NSFontAttributeName,
+    NSFontWeightMedium,
+    NSForegroundColorAttributeName,
+    NSImage,
+    NSImageView,
     NSMakeRect,
     NSNoTabsNoBorder,
     NSNormalWindowLevel,
@@ -35,65 +47,124 @@ from AppKit import (
     NSPasteboardTypeString,
     NSScrollView,
     NSSearchToolbarItem,
+    NSSwitch,
+    NSTableCellView,
     NSTableColumn,
     NSTableView,
+    NSTableViewSelectionHighlightStyleNone,
+    NSTableViewStyleInset,
     NSTableViewStyleSourceList,
     NSTabView,
     NSTabViewItem,
     NSTextField,
-    NSTextView,
     NSToolbar,
+    NSToolbarDisplayModeIconOnly,
     NSToolbarFlexibleSpaceItemIdentifier,
     NSView,
+    NSViewHeightSizable,
+    NSViewWidthSizable,
     NSVisualEffectBlendingModeBehindWindow,
     NSVisualEffectMaterialSidebar,
+    NSVisualEffectMaterialUnderWindowBackground,
     NSVisualEffectStateActive,
     NSVisualEffectView,
     NSWindow,
     NSWindowStyleMaskClosable,
+    NSWindowStyleMaskFullSizeContentView,
     NSWindowStyleMaskMiniaturizable,
     NSWindowStyleMaskTitled,
     NSWindowToolbarStyleUnified,
 )
-from Foundation import NSIndexSet
+from Foundation import (
+    NSAttributedString,
+    NSIndexSet,
+    NSMakeSize,
+    NSMutableAttributedString,
+)
 
 from settings_window import SettingsPaneController, pane_min_size
+from ui_kit import FlippedView as _FlippedView, make_pill as _make_pill
 
+# Liquid Glass (M8) — same guard as result_panel.py. Style 1 == clear
+# (NSGlassEffectViewStyleClear): the high-transparency look the user asked
+# for; "regular"(0) is the frosted variant.
+try:
+    _GlassEffectView = objc.lookUpClass("NSGlassEffectView")
+except objc.error:
+    _GlassEffectView = None
+_GLASS_STYLES = {"regular": 0, "clear": 1}
+
+# M8 폴리시 scale-up (user feedback): boxes ×1.3, fonts ×1.15
 PADDING = 16
 ROW_HEIGHT = 24
-DETAIL_HEIGHT = 170
-CONTENT_WIDTH = 760.0
-CONTENT_HEIGHT = 660.0
-SIDEBAR_WIDTH = 160.0
+CONTENT_WIDTH = 1170.0
+CONTENT_HEIGHT = 860.0
+WINDOW_RADIUS = 26.0  # big rounded glass sheet — edges show through
+SIDEBAR_WIDTH = 210.0
+SIDEBAR_INSET = 10.0  # the sidebar floats — gap to the window edges
+SIDEBAR_RADIUS = 14.0
+SESSIONS_WIDTH = 364.0  # right-hand session list column
+BUBBLE_RADIUS = 14.0
+BUBBLE_PAD = 12.0
+BUBBLE_GAP = 14.0
+CAPTION_H = 18.0
+FONT_BODY = 15.0  # 13 × 1.15
+FONT_SMALL = 12.0  # captions / session sublines
+FONT_UI = 14.0  # buttons, switch labels, session titles
 _SEARCH_ITEM_ID = "search"
 
 _MODE_LABELS = {"text": "텍스트", "region": "화면", "followup": "추가질문"}
 
 
-def _row_title(record):
-    ts = str(record.get("ts", ""))[5:16].replace("T", " ")  # "MM-DD HH:MM"
-    mode = _MODE_LABELS.get(record.get("mode"), str(record.get("mode")))
-    snippet = " ".join(str(record.get("input", "")).split())[:80]
-    return f"{ts} · {mode} · {snippet}"
+def _short_ts(record):
+    return str(record.get("ts", ""))[5:16].replace("T", " ")  # "MM-DD HH:MM"
 
 
-def _detail_text(record):
-    return (
-        f"{record.get('ts', '')} · "
-        f"{_MODE_LABELS.get(record.get('mode'), record.get('mode'))} · "
-        f"{record.get('model', '')} · {record.get('detail', '')}\n"
-        f"\n질문:\n{record.get('input', '')}\n"
-        f"\n────────\n"
-        f"\n응답:\n{record.get('response', '')}"
-    )
+def _build_sessions(records):
+    """Group newest-first records into sessions: a text/region record plus
+    the follow-up records that came after it (chronological order inside)."""
+    sessions = []
+    for record in reversed(records):  # oldest → newest
+        if record.get("mode") == "followup" and sessions:
+            sessions[-1]["records"].append(record)
+        else:
+            sessions.append({"records": [record]})
+    sessions.reverse()  # newest session first
+    return sessions
+
+
+def _session_transcript(session):
+    parts = []
+    for record in session["records"]:
+        parts.append(f"질문:\n{record.get('input', '')}")
+        parts.append(f"응답:\n{record.get('response', '')}")
+    return "\n\n".join(parts)
+
+
+class _MainWindow(NSWindow):
+    """⌘W closes the window. An Accessory app has no main menu, so there is
+    no Close menu item to provide the key equivalent — handle it here. Match
+    by keyCode (kVK_ANSI_W = 13), never by character: under the Korean 2-set
+    layout ⌘W reports 'ㅈ' (hard rule #1)."""
+
+    def performKeyEquivalent_(self, event):
+        if (event.modifierFlags() & NSEventModifierFlagCommand
+                and event.keyCode() == 13):
+            self.performClose_(None)
+            return True
+        return objc.super(_MainWindow, self).performKeyEquivalent_(event)
 
 
 class _SidebarController(NSObject):
     """Datasource/delegate for the source-list sidebar (M8). A separate
-    object on purpose: MainWindowController already serves the history table
-    and a shared delegate would make every callback ambiguous."""
+    object on purpose: MainWindowController already serves the sessions table
+    and a shared delegate would make every callback ambiguous. Codex-style
+    cells: SF Symbol icon + 15pt label (view-based)."""
 
-    _ITEMS = (("history", "기록"), ("settings", "설정"))
+    _ITEMS = (
+        ("history", "기록", "clock.arrow.circlepath"),
+        ("settings", "설정", "gearshape"),
+    )
 
     def initWithOwner_(self, owner):
         self = objc.super(_SidebarController, self).init()
@@ -106,16 +177,64 @@ class _SidebarController(NSObject):
     def numberOfRowsInTableView_(self, table):
         return len(self._ITEMS)
 
-    def tableView_objectValueForTableColumn_row_(self, table, column, row):
-        return self._ITEMS[row][1]
+    def tableView_viewForTableColumn_row_(self, table, column, row):
+        """Codex-style item: rounded pill drawn by the cell itself — the
+        system source-list capsule re-tiled the row on selection, which made
+        the items wobble a few px (user-reported). Selected = accent pill
+        with white icon/label; geometry never changes."""
+        _key, label, symbol = self._ITEMS[row]
+        selected = row == self.table.selectedRow()
+        w = float(column.width()) if column is not None else SIDEBAR_WIDTH - 20
+        cell = NSTableCellView.alloc().initWithFrame_(NSMakeRect(0, 0, w, 36))
+        pill = NSBox.alloc().initWithFrame_(NSMakeRect(0, 2, w, 32))
+        pill.setBoxType_(NSBoxCustom)
+        pill.setTitlePosition_(0)
+        pill.setBorderWidth_(0.0)
+        pill.setCornerRadius_(9.0)
+        pill.setContentViewMargins_(NSMakeSize(0, 0))
+        pill.setFillColor_(
+            NSColor.controlAccentColor() if selected else NSColor.clearColor()
+        )
+        cell.addSubview_(pill)
+        icon = NSImageView.alloc().initWithFrame_(NSMakeRect(10, 5, 22, 22))
+        icon.setImage_(
+            NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+                symbol, label
+            )
+        )
+        icon.setContentTintColor_(
+            NSColor.whiteColor() if selected else NSColor.secondaryLabelColor()
+        )
+        pill.contentView().addSubview_(icon)
+        text = NSTextField.labelWithString_(label)
+        text.setFont_(NSFont.systemFontOfSize_(15.0))
+        text.setTextColor_(
+            NSColor.whiteColor() if selected else NSColor.labelColor()
+        )
+        text.setFrame_(NSMakeRect(40, 6, w - 50, 20))
+        pill.contentView().addSubview_(text)
+        cell.setImageView_(icon)
+        cell.setTextField_(text)
+        return cell
 
     def tableViewSelectionDidChange_(self, notification):
         row = self.table.selectedRow()
+        previous = getattr(self, "_last_row", -1)
+        self._last_row = row
+        from Foundation import NSMutableIndexSet
+        index_set = NSMutableIndexSet.indexSet()
+        for r in {previous, row}:
+            if 0 <= r < len(self._ITEMS):
+                index_set.addIndex_(r)
+        if index_set.count():
+            self.table.reloadDataForRowIndexes_columnIndexes_(
+                index_set, NSIndexSet.indexSetWithIndex_(0)
+            )
         if 0 <= row < len(self._ITEMS):
             self.owner._sidebarSelected_(self._ITEMS[row][0])
 
     def selectIdentifier_(self, identifier):
-        for i, (key, _label) in enumerate(self._ITEMS):
+        for i, (key, _label, _symbol) in enumerate(self._ITEMS):
             if key == identifier:
                 self.table.selectRowIndexes_byExtendingSelection_(
                     NSIndexSet.indexSetWithIndex_(i), False
@@ -138,16 +257,17 @@ class MainWindowController(NSObject):
         self.sidebar = _SidebarController.alloc().initWithOwner_(self)
         self.sidebar_effect = None
         self.search_field = None  # the unified toolbar's search field (M8)
-        self.table = None
-        self.detail_view = None
+        self.table = None  # session list (right column)
+        self.chat_scroll = None
+        self.chat_doc = None
         self.copy_button = None
         self.reask_button = None
-        self.enabled_checkbox = None
-        self.save_images_checkbox = None
-        self.save_text_checkbox = None
-        self.floating_checkbox = None
-        self._all = []  # every record, newest first
-        self._filtered = []  # rows currently in the table
+        self.enabled_switch = None
+        self.save_images_switch = None
+        self.save_text_switch = None
+        self.floating_switch = None
+        self._all = []  # all sessions, newest first
+        self._filtered = []  # sessions currently in the list
         history.on_appended = self._historyAppended
         return self
 
@@ -224,6 +344,7 @@ class MainWindowController(NSObject):
         item = NSSearchToolbarItem.alloc().initWithItemIdentifier_(
             _SEARCH_ITEM_ID
         )
+        item.setPreferredWidthForSearchField_(240.0)
         field = item.searchField()
         field.setPlaceholderString_("검색 (질문/응답)")
         field.setTarget_(self)
@@ -234,19 +355,33 @@ class MainWindowController(NSObject):
 
     # -- build -------------------------------------------------------------------
 
+    def _glassStyle(self):
+        return _GLASS_STYLES.get(str(self.config.get("glass_style")), 1)
+
+    def _useGlass(self):
+        return _GlassEffectView is not None and bool(
+            self.config.get("glass_enabled")
+        )
+
     def _buildWindow(self):
         pane_w, pane_h = pane_min_size()
-        width = SIDEBAR_WIDTH + max(CONTENT_WIDTH, pane_w + PADDING * 2)
+        content_x = SIDEBAR_INSET + SIDEBAR_WIDTH + 8  # right of the island
+        width = content_x + max(CONTENT_WIDTH, pane_w + PADDING * 2)
         height = max(CONTENT_HEIGHT, pane_h + PADDING)
-        self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        # Full-size content view: the glass body runs the full window height
+        # under the transparent titlebar/toolbar. Panes are laid out within
+        # contentLayoutRect height so they never sit under the toolbar.
+        self.window = _MainWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, width, height),
             NSWindowStyleMaskTitled
             | NSWindowStyleMaskClosable
-            | NSWindowStyleMaskMiniaturizable,
+            | NSWindowStyleMaskMiniaturizable
+            | NSWindowStyleMaskFullSizeContentView,
             NSBackingStoreBuffered,
             False,
         )
         self.window.setTitle_("Macsist")
+        self.window.setTitlebarAppearsTransparent_(True)
         self.window.setReleasedWhenClosed_(False)
         self.window.setDelegate_(self)  # windowWillClose_ → Accessory policy
         self._applyFloating()
@@ -256,30 +391,106 @@ class MainWindowController(NSObject):
         toolbar = NSToolbar.alloc().initWithIdentifier_("MacsistToolbar")
         toolbar.setDelegate_(self)
         toolbar.setAllowsUserCustomization_(False)
+        toolbar.setDisplayMode_(NSToolbarDisplayModeIconOnly)  # no item labels
         self.window.setToolbar_(toolbar)
         self.window.setToolbarStyle_(NSWindowToolbarStyleUnified)
 
+        # grow the window by the titlebar+toolbar height so the panes keep
+        # their full design height below the toolbar
+        chrome_h = height - self.window.contentLayoutRect().size.height
+        total_h = height + chrome_h
+        self.window.setContentSize_((width, total_h))
+        print(f"main window chrome_h={chrome_h:.0f}", flush=True)
+
         content = self.window.contentView()
+        use_glass = self._useGlass()
 
-        # M8 translucent sidebar: source-list material + 기록/설정 list
-        self.sidebar_effect = NSVisualEffectView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, SIDEBAR_WIDTH, height)
+        # Translucent glass sheet body (user feedback round 2: clear was too
+        # transparent — frosted glass + a windowBackground tint keeps text
+        # readable while the desktop still shows through). The big corner
+        # radius + non-opaque window leaves the window edges genuinely
+        # transparent outside the rounded sheet.
+        self.window.setOpaque_(False)
+        self.window.setBackgroundColor_(NSColor.clearColor())
+        tint_alpha = float(self.config.get("glass_window_tint_alpha"))
+        if use_glass:
+            body = _GlassEffectView.alloc().initWithFrame_(
+                NSMakeRect(0, 0, width, total_h)
+            )
+            body.setStyle_(self._glassStyle())
+            body.setCornerRadius_(WINDOW_RADIUS)
+            if tint_alpha > 0:
+                body.setTintColor_(
+                    NSColor.windowBackgroundColor().colorWithAlphaComponent_(
+                        tint_alpha
+                    )
+                )
+        else:
+            body = NSVisualEffectView.alloc().initWithFrame_(
+                NSMakeRect(0, 0, width, total_h)
+            )
+            body.setMaterial_(NSVisualEffectMaterialUnderWindowBackground)
+            body.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
+            body.setState_(NSVisualEffectStateActive)
+            body.setWantsLayer_(True)
+            body.layer().setCornerRadius_(WINDOW_RADIUS)
+            body.layer().setMasksToBounds_(True)
+        body.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        content.addSubview_(body)
+        print(
+            f"window body={type(body).__name__} glass={use_glass} "
+            f"style={self._glassStyle()} tint={tint_alpha:g} "
+            f"radius={WINDOW_RADIUS:g}",
+            flush=True,
         )
-        self.sidebar_effect.setMaterial_(NSVisualEffectMaterialSidebar)
-        self.sidebar_effect.setBlendingMode_(
-            NSVisualEffectBlendingModeBehindWindow
-        )
-        self.sidebar_effect.setState_(NSVisualEffectStateActive)
-        content.addSubview_(self.sidebar_effect)
 
+        # Floating glass sidebar island (Finder style): inset from every
+        # window edge, rounded, traffic lights sitting on top of it.
+        island_h = total_h - 2 * SIDEBAR_INSET
+        island = NSMakeRect(SIDEBAR_INSET, SIDEBAR_INSET, SIDEBAR_WIDTH,
+                            island_h)
+        if use_glass:
+            backdrop = _GlassEffectView.alloc().initWithFrame_(island)
+            backdrop.setCornerRadius_(SIDEBAR_RADIUS)
+            backdrop.setStyle_(self._glassStyle())
+            side_host = NSView.alloc().initWithFrame_(
+                NSMakeRect(0, 0, SIDEBAR_WIDTH, island_h)
+            )
+            backdrop.setContentView_(side_host)
+        else:
+            backdrop = NSVisualEffectView.alloc().initWithFrame_(island)
+            backdrop.setMaterial_(NSVisualEffectMaterialSidebar)
+            backdrop.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
+            backdrop.setState_(NSVisualEffectStateActive)
+            backdrop.setWantsLayer_(True)
+            backdrop.layer().setCornerRadius_(SIDEBAR_RADIUS)
+            backdrop.layer().setMasksToBounds_(True)
+            side_host = backdrop
+        content.addSubview_(backdrop)
+        self.sidebar_effect = backdrop
+        print(
+            f"sidebar island={type(backdrop).__name__} glass={use_glass}",
+            flush=True,
+        )
+
+        # source list (기록/설정) at the island top, below the traffic lights
+        list_h = 2 * 36.0 + 8
         side_scroll = NSScrollView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, SIDEBAR_WIDTH, height - PADDING)
+            NSMakeRect(0, island_h - 44 - list_h, SIDEBAR_WIDTH, list_h)
         )
         side_scroll.setDrawsBackground_(False)
         side_table = NSTableView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, SIDEBAR_WIDTH, height - PADDING)
+            NSMakeRect(0, 0, SIDEBAR_WIDTH, list_h)
         )
         side_table.setStyle_(NSTableViewStyleSourceList)
+        side_table.setFocusRingType_(NSFocusRingTypeNone)
+        side_table.setBackgroundColor_(NSColor.clearColor())
+        side_table.setRowHeight_(36.0)
+        # the cell draws its own selection pill — the system capsule
+        # re-tiles rows on selection and made the sidebar wobble
+        side_table.setSelectionHighlightStyle_(
+            NSTableViewSelectionHighlightStyleNone
+        )
         column = NSTableColumn.alloc().initWithIdentifier_("item")
         column.setWidth_(SIDEBAR_WIDTH - 20)
         side_table.addTableColumn_(column)
@@ -289,11 +500,27 @@ class MainWindowController(NSObject):
         side_table.setDelegate_(self.sidebar)
         self.sidebar.table = side_table
         side_scroll.setDocumentView_(side_table)
-        self.sidebar_effect.addSubview_(side_scroll)
+        side_host.addSubview_(side_scroll)
 
-        # tabless tab view fills the area right of the sidebar
+        # toggle switches at the island bottom (user feedback: switches, not
+        # checkboxes, and they live in the sidebar)
+        self.enabled_switch = self._addSwitchTo_y_title_action_(
+            side_host, 14 + 3 * 36, "기록 저장", "toggleEnabled:"
+        )
+        self.save_images_switch = self._addSwitchTo_y_title_action_(
+            side_host, 14 + 2 * 36, "이미지 저장", "toggleSaveImages:"
+        )
+        self.save_text_switch = self._addSwitchTo_y_title_action_(
+            side_host, 14 + 1 * 36, "텍스트 저장", "toggleSaveText:"
+        )
+        self.floating_switch = self._addSwitchTo_y_title_action_(
+            side_host, 14, "항상 위", "toggleFloating:"
+        )
+
+        # tabless tab view fills the area right of the island, below the
+        # toolbar (its height is the pre-chrome design height)
         self.tab_view = NSTabView.alloc().initWithFrame_(
-            NSMakeRect(SIDEBAR_WIDTH, 0, width - SIDEBAR_WIDTH, height)
+            NSMakeRect(content_x, 0, width - content_x, height)
         )
         self.tab_view.setTabViewType_(NSNoTabsNoBorder)
         self.tab_view.setDelegate_(self)
@@ -316,104 +543,96 @@ class MainWindowController(NSObject):
         item.setView_(settings_view)
         self.tab_view.addTabViewItem_(item)
 
+        # first open lands screen-centered (it spawned bottom-left otherwise);
+        # the position the user drags it to is kept for later opens
+        self.window.center()
+
+    def _addSwitchTo_y_title_action_(self, host, y, title, action):
+        label = NSTextField.labelWithString_(title)
+        label.setFont_(NSFont.systemFontOfSize_(FONT_UI))
+        label.setFrame_(NSMakeRect(16, y + 5, SIDEBAR_WIDTH - 80, 17))
+        host.addSubview_(label)
+        switch = NSSwitch.alloc().initWithFrame_(
+            NSMakeRect(SIDEBAR_WIDTH - 16 - 40, y, 40, 26)
+        )
+        switch.setTarget_(self)
+        switch.setAction_(action)
+        host.addSubview_(switch)
+        return switch
+
     def _buildHistoryTab_(self, container):
         size = container.frame().size
         cw, ch = size.width, size.height
+        sessions_x = cw - PADDING - SESSIONS_WIDTH
+        chat_w = sessions_x - 8 - PADDING
 
-        # top row: save toggles + 항상 위 (M8 — search moved to the toolbar)
-        toggles_y = ch - PADDING - ROW_HEIGHT
-        self.floating_checkbox = NSButton.checkboxWithTitle_target_action_(
-            "항상 위", self, "toggleFloating:"
+        # bottom-left: actions for the selected session (rounded pill style)
+        self.copy_button = _make_pill(
+            "복사", self, "copyResponse:",
+            NSMakeRect(PADDING, PADDING, 96, 34),
         )
-        self.floating_checkbox.setFrame_(
-            NSMakeRect(cw - PADDING - 80, toggles_y, 80, ROW_HEIGHT)
-        )
-        container.addSubview_(self.floating_checkbox)
-        self.enabled_checkbox = NSButton.checkboxWithTitle_target_action_(
-            "기록 저장 (전체)", self, "toggleEnabled:"
-        )
-        self.enabled_checkbox.setFrame_(
-            NSMakeRect(PADDING, toggles_y, 140, ROW_HEIGHT)
-        )
-        container.addSubview_(self.enabled_checkbox)
-        self.save_images_checkbox = NSButton.checkboxWithTitle_target_action_(
-            "이미지 저장", self, "toggleSaveImages:"
-        )
-        self.save_images_checkbox.setFrame_(
-            NSMakeRect(PADDING + 164, toggles_y, 110, ROW_HEIGHT)
-        )
-        container.addSubview_(self.save_images_checkbox)
-        self.save_text_checkbox = NSButton.checkboxWithTitle_target_action_(
-            "텍스트 저장", self, "toggleSaveText:"
-        )
-        self.save_text_checkbox.setFrame_(
-            NSMakeRect(PADDING + 164 + 118, toggles_y, 110, ROW_HEIGHT)
-        )
-        container.addSubview_(self.save_text_checkbox)
-
-        # bottom: buttons row, then the detail text above it
-        self.copy_button = NSButton.buttonWithTitle_target_action_(
-            "복사", self, "copyResponse:"
-        )
-        self.copy_button.setFrame_(NSMakeRect(PADDING, PADDING, 80, ROW_HEIGHT))
         container.addSubview_(self.copy_button)
-        self.reask_button = NSButton.buttonWithTitle_target_action_(
-            "다시 질문", self, "reask:"
-        )
-        self.reask_button.setFrame_(
-            NSMakeRect(PADDING + 88, PADDING, 100, ROW_HEIGHT)
+        self.reask_button = _make_pill(
+            "다시 질문", self, "reask:",
+            NSMakeRect(PADDING + 104, PADDING, 120, 34),
         )
         container.addSubview_(self.reask_button)
 
-        detail_y = PADDING + ROW_HEIGHT + 8
-        detail_scroll = NSTextView.scrollableTextView()
-        detail_scroll.setFrame_(
-            NSMakeRect(PADDING, detail_y, cw - PADDING * 2, DETAIL_HEIGHT)
+        # middle: the chat transcript (AI left, user right)
+        chat_y = PADDING + ROW_HEIGHT + 8
+        self.chat_scroll = NSScrollView.alloc().initWithFrame_(
+            NSMakeRect(PADDING, chat_y, chat_w, ch - chat_y - PADDING)
         )
-        self.detail_view = detail_scroll.documentView()
-        self.detail_view.setEditable_(False)
-        self.detail_view.setRichText_(False)
-        self.detail_view.setFont_(NSFont.systemFontOfSize_(12.0))
-        container.addSubview_(detail_scroll)
+        self.chat_scroll.setHasVerticalScroller_(True)
+        self.chat_scroll.setDrawsBackground_(False)
+        self.chat_doc = _FlippedView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, chat_w, 10)
+        )
+        self.chat_scroll.setDocumentView_(self.chat_doc)
+        container.addSubview_(self.chat_scroll)
 
-        # middle: the record table fills the rest
-        table_y = detail_y + DETAIL_HEIGHT + 8
-        table_h = toggles_y - 8 - table_y
-        scroll = NSScrollView.alloc().initWithFrame_(
-            NSMakeRect(PADDING, table_y, cw - PADDING * 2, table_h)
+        # right: session cards (snippet + datetime), chatbot-style
+        sess_scroll = NSScrollView.alloc().initWithFrame_(
+            NSMakeRect(sessions_x, PADDING, SESSIONS_WIDTH, ch - PADDING * 2)
         )
-        scroll.setHasVerticalScroller_(True)
+        sess_scroll.setHasVerticalScroller_(True)
+        sess_scroll.setDrawsBackground_(False)
         self.table = NSTableView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, cw - PADDING * 2, table_h)
+            NSMakeRect(0, 0, SESSIONS_WIDTH, ch - PADDING * 2)
         )
-        column = NSTableColumn.alloc().initWithIdentifier_("qa")
-        column.setWidth_(cw - PADDING * 2 - 20)
-        column.setTitle_("기록")
+        self.table.setStyle_(NSTableViewStyleInset)
+        self.table.setFocusRingType_(NSFocusRingTypeNone)
+        self.table.setBackgroundColor_(NSColor.clearColor())
+        self.table.setRowHeight_(64.0)
+        # selection is drawn by the card itself (rounded grid, Codex-style)
+        self.table.setSelectionHighlightStyle_(
+            NSTableViewSelectionHighlightStyleNone
+        )
+        column = NSTableColumn.alloc().initWithIdentifier_("session")
+        column.setWidth_(SESSIONS_WIDTH - 24)
         self.table.addTableColumn_(column)
         self.table.setHeaderView_(None)
         self.table.setDataSource_(self)
         self.table.setDelegate_(self)
         self.table.setAllowsMultipleSelection_(False)
-        scroll.setDocumentView_(self.table)
-        container.addSubview_(scroll)
+        sess_scroll.setDocumentView_(self.table)
+        container.addSubview_(sess_scroll)
 
-        self._showDetail_(None)
-
-    # -- history list ------------------------------------------------------------
+    # -- history sessions ---------------------------------------------------------
 
     def refreshHistory(self):
-        self._all = self.history.load()
-        self.enabled_checkbox.setState_(
+        self._all = _build_sessions(self.history.load())
+        self.enabled_switch.setState_(
             1 if self.config.get("history_enabled") else 0
         )
-        self.save_images_checkbox.setState_(
+        self.save_images_switch.setState_(
             1 if self.config.get("history_save_images") else 0
         )
-        self.save_text_checkbox.setState_(
+        self.save_text_switch.setState_(
             1 if self.config.get("history_save_text") else 0
         )
         self._applySaveToggleEnabled()
-        self.floating_checkbox.setState_(
+        self.floating_switch.setState_(
             1 if self.config.get("history_window_floating") else 0
         )
         self.applyFilter()
@@ -421,22 +640,33 @@ class MainWindowController(NSObject):
     def _applySaveToggleEnabled(self):
         # sub-toggles are meaningless while the master switch is off
         master = bool(self.config.get("history_enabled"))
-        self.save_images_checkbox.setEnabled_(master)
-        self.save_text_checkbox.setEnabled_(master)
+        self.save_images_switch.setEnabled_(master)
+        self.save_text_switch.setEnabled_(master)
+
+    def _session_matches(self, session, query):
+        for record in session["records"]:
+            if (query in str(record.get("input", "")).lower()
+                    or query in str(record.get("response", "")).lower()):
+                return True
+        return False
 
     def applyFilter(self):
         query = str(self.search_field.stringValue()).strip().lower()
         if query:
             self._filtered = [
-                r for r in self._all
-                if query in str(r.get("input", "")).lower()
-                or query in str(r.get("response", "")).lower()
+                s for s in self._all if self._session_matches(s, query)
             ]
         else:
             self._filtered = list(self._all)
         self.table.reloadData()
-        self.table.deselectAll_(None)
-        self._showDetail_(None)
+        # auto-select the newest session so the chat pane is never empty
+        if self._filtered:
+            self.table.selectRowIndexes_byExtendingSelection_(
+                NSIndexSet.indexSetWithIndex_(0), False
+            )
+        else:
+            self.table.deselectAll_(None)
+            self._renderChat_(None)
         print(
             f"history filter q={query!r} -> {len(self._filtered)}/{len(self._all)}",
             flush=True,
@@ -450,61 +680,206 @@ class MainWindowController(NSObject):
     def searchChanged_(self, sender):
         self.applyFilter()
 
+    # session list datasource/delegate — rounded card cells (Codex-style)
+
     def numberOfRowsInTableView_(self, table):
         return len(self._filtered)
 
-    def tableView_objectValueForTableColumn_row_(self, table, column, row):
-        return _row_title(self._filtered[row])
+    def tableView_viewForTableColumn_row_(self, table, column, row):
+        session = self._filtered[row]
+        records = session["records"]
+        first = records[0]
+        mode = _MODE_LABELS.get(first.get("mode"), str(first.get("mode")))
+        title_text = (
+            " ".join(str(first.get("input", "")).split())[:44] or "(빈 질문)"
+        )
+        sub_text = f"{_short_ts(first)} · {mode} · {len(records)}턴"
+        w = float(column.width()) if column is not None else SESSIONS_WIDTH - 24
+        container = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, w, 64))
+        card = NSBox.alloc().initWithFrame_(NSMakeRect(2, 3, w - 4, 58))
+        card.setBoxType_(NSBoxCustom)
+        card.setTitlePosition_(0)
+        card.setBorderWidth_(0.0)
+        card.setCornerRadius_(12.0)
+        card.setContentViewMargins_(NSMakeSize(0, 0))
+        if row == self.table.selectedRow():
+            card.setFillColor_(
+                NSColor.controlAccentColor().colorWithAlphaComponent_(0.22)
+            )
+        else:
+            card.setFillColor_(
+                NSColor.textBackgroundColor().colorWithAlphaComponent_(0.55)
+            )
+        title = NSTextField.labelWithString_(title_text)
+        title.setFont_(NSFont.systemFontOfSize_weight_(FONT_UI,
+                                                       NSFontWeightMedium))
+        title.setLineBreakMode_(4)  # truncate tail
+        title.setFrame_(NSMakeRect(12, 31, w - 28, 18))
+        card.contentView().addSubview_(title)
+        sub = NSTextField.labelWithString_(sub_text)
+        sub.setFont_(NSFont.systemFontOfSize_(FONT_SMALL))
+        sub.setTextColor_(NSColor.secondaryLabelColor())
+        sub.setFrame_(NSMakeRect(12, 9, w - 28, 16))
+        card.contentView().addSubview_(sub)
+        container.addSubview_(card)
+        return container
+
+    def _reloadSessionRows_(self, rows):
+        valid = {r for r in rows if 0 <= r < len(self._filtered)}
+        if not valid:
+            return
+        from Foundation import NSMutableIndexSet
+        index_set = NSMutableIndexSet.indexSet()
+        for r in valid:
+            index_set.addIndex_(r)
+        self.table.reloadDataForRowIndexes_columnIndexes_(
+            index_set, NSIndexSet.indexSetWithIndex_(0)
+        )
 
     def tableViewSelectionDidChange_(self, notification):
-        self._showDetail_(self._selectedRecord())
+        # repaint the previously/newly selected cards (selection is card fill)
+        current = self.table.selectedRow()
+        previous = getattr(self, "_last_selected_row", -1)
+        self._last_selected_row = current
+        self._reloadSessionRows_([previous, current])
+        self._renderChat_(self._selectedSession())
 
-    def _selectedRecord(self):
+    def _selectedSession(self):
         row = self.table.selectedRow()
         if 0 <= row < len(self._filtered):
             return self._filtered[row]
         return None
 
-    def _showDetail_(self, record):
-        if record is None:
-            self.detail_view.setString_(
+    # -- chat transcript rendering -------------------------------------------------
+
+    def _renderChat_(self, session):
+        doc = self.chat_doc
+        for sub in list(doc.subviews()):
+            sub.removeFromSuperview()
+        doc_w = self.chat_scroll.contentSize().width
+        y = 4.0
+        if session is None:
+            label = NSTextField.labelWithString_(
                 "기록이 없습니다." if not self._filtered
-                else "행을 선택하면 전체 내용이 표시됩니다."
+                else "세션을 선택하면 대화가 표시됩니다."
             )
-            self.copy_button.setEnabled_(False)
-            self.reask_button.setEnabled_(False)
-            return
-        self.detail_view.setString_(_detail_text(record))
-        self.detail_view.scrollRangeToVisible_((0, 0))
-        self.copy_button.setEnabled_(True)
-        if record.get("mode") == "region":
-            # re-runnable only when its capture PNG was saved and still exists
-            self.reask_button.setEnabled_(
-                self.history.image_path(record) is not None
-            )
+            label.setTextColor_(NSColor.secondaryLabelColor())
+            label.setFrame_(NSMakeRect(8, y, doc_w - 16, 20))
+            doc.addSubview_(label)
+            y += 28
         else:
-            self.reask_button.setEnabled_(True)
+            cap_font = NSFont.systemFontOfSize_(FONT_SMALL)
+            max_text_w = max(120.0, doc_w * 0.72) - 2 * BUBBLE_PAD
+            for record in session["records"]:
+                mode = _MODE_LABELS.get(
+                    record.get("mode"), str(record.get("mode"))
+                )
+                caption = NSTextField.labelWithString_(
+                    f"{_short_ts(record)} · {mode} · "
+                    f"{record.get('model', '')}"
+                )
+                caption.setFont_(cap_font)
+                caption.setTextColor_(NSColor.tertiaryLabelColor())
+                caption.setAlignment_(2)  # NSTextAlignmentCenter
+                caption.setFrame_(NSMakeRect(0, y, doc_w, CAPTION_H))
+                doc.addSubview_(caption)
+                y += CAPTION_H + 4
+                # user question — right-aligned accent bubble
+                y = self._addBubbleTo_y_text_width_right_(
+                    doc, y, str(record.get("input", "")), max_text_w, True
+                ) + BUBBLE_GAP
+                # AI answer — left-aligned neutral bubble
+                y = self._addBubbleTo_y_text_width_right_(
+                    doc, y, str(record.get("response", "")), max_text_w, False
+                ) + BUBBLE_GAP
+        doc.setFrame_(NSMakeRect(0, 0, doc_w, max(y, 10.0)))
+        doc.scrollPoint_((0, 0))  # flipped: (0,0) is the top
+        has = session is not None
+        self.copy_button.setEnabled_(has)
+        if has:
+            first = session["records"][0]
+            if first.get("mode") == "region":
+                # re-runnable only when its capture PNG still exists
+                self.reask_button.setEnabled_(
+                    self.history.image_path(first) is not None
+                )
+            else:
+                self.reask_button.setEnabled_(True)
+        else:
+            self.reask_button.setEnabled_(False)
+        print(
+            f"chat rendered turns={len(session['records']) if session else 0} "
+            f"height={y:.0f}",
+            flush=True,
+        )
+
+    def _addBubbleTo_y_text_width_right_(self, doc, y, text, max_text_w,
+                                         is_user):
+        doc_w = doc.frame().size.width or self.chat_scroll.contentSize().width
+        font = NSFont.systemFontOfSize_(FONT_BODY)
+        text = text if text.strip() else " "
+        # explicit attributed text — wrapping labels can drop a plain
+        # setTextColor_, which made the white-on-accent text invisible
+        attr = NSAttributedString.alloc().initWithString_attributes_(
+            text, {
+                NSFontAttributeName: font,
+                NSForegroundColorAttributeName:
+                    NSColor.whiteColor() if is_user else NSColor.labelColor(),
+            }
+        )
+        label = NSTextField.wrappingLabelWithString_(text)
+        label.setAttributedStringValue_(attr)
+        label.setSelectable_(True)
+        # measure with the field's own cell — boundingRect under-counts the
+        # per-line leading on long answers, which clipped the bubble tails
+        size = label.cell().cellSizeForBounds_(
+            NSMakeRect(0, 0, max_text_w, 1.0e7)
+        )
+        tw = min(max_text_w, math.ceil(size.width))
+        th = math.ceil(size.height)
+        bw = tw + 2 * BUBBLE_PAD  # bubble hugs its text like a chat app
+        bh = th + 2 * BUBBLE_PAD
+        bx = (doc_w - bw - 2) if is_user else 2
+        bubble = NSBox.alloc().initWithFrame_(NSMakeRect(bx, y, bw, bh))
+        bubble.setBoxType_(NSBoxCustom)
+        bubble.setTitlePosition_(0)  # NSNoTitle
+        bubble.setBorderWidth_(0.0)
+        bubble.setCornerRadius_(BUBBLE_RADIUS)
+        # default contentViewMargins (5,5) silently clipped the label
+        bubble.setContentViewMargins_(NSMakeSize(0, 0))
+        # NSBox re-resolves semantic fills on appearance change (vs CALayer)
+        if is_user:
+            bubble.setFillColor_(NSColor.controlAccentColor())
+        else:
+            bubble.setFillColor_(
+                NSColor.textBackgroundColor().colorWithAlphaComponent_(0.85)
+            )
+        label.setFrame_(NSMakeRect(BUBBLE_PAD, BUBBLE_PAD, tw, th))
+        bubble.contentView().addSubview_(label)
+        doc.addSubview_(bubble)
+        return y + bh
 
     # -- actions -------------------------------------------------------------------
 
     def copyResponse_(self, sender):
-        record = self._selectedRecord()
-        if record is None:
+        session = self._selectedSession()
+        if session is None:
             return
         pasteboard = NSPasteboard.generalPasteboard()
         pasteboard.clearContents()
         pasteboard.setString_forType_(
-            str(record.get("response", "")), NSPasteboardTypeString
+            _session_transcript(session), NSPasteboardTypeString
         )
         print("history: response copied", flush=True)
 
     def reask_(self, sender):
-        record = self._selectedRecord()
-        if record is None:
+        session = self._selectedSession()
+        if session is None:
             return
-        text = str(record.get("input", ""))
-        if record.get("mode") == "region":
-            path = self.history.image_path(record)
+        first = session["records"][0]
+        text = str(first.get("input", ""))
+        if first.get("mode") == "region":
+            path = self.history.image_path(first)
             if path is None or self.on_reask_image is None:
                 return
             self.on_reask_image(text, path.read_bytes())

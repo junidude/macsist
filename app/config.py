@@ -86,18 +86,25 @@ DEFAULTS = {
     "capture_copy_timeout": 0.6,
     "capture_modifier_release_timeout": 0.3,
     "capture_max_chars": 4000,
-    "panel_width": 420.0,
+    # M8 폴리시: 상자 1.3배 / 폰트 1.15배 확대 (사용자 피드백)
+    "panel_width": 546.0,
     # M8: 패널은 panel_min_height에서 시작해 내용에 맞춰 panel_height까지
     # 자라고(auto-height), 그 뒤로는 스크롤된다.
-    "panel_height": 260.0,
-    "panel_min_height": 120.0,
+    "panel_height": 338.0,
+    "panel_min_height": 156.0,
+    "panel_font_size": 15.0,
     # follow-up 세션이 시작되면(첫 질문 제출) 패널이 이 높이로 커진다 (M6)
-    "panel_height_expanded": 420.0,
+    "panel_height_expanded": 546.0,
     "panel_cursor_offset": 12.0,
     # M8 glass UI: NSGlassEffectView 사용 여부 (False면 NSVisualEffectView
     # hudWindow 폴백 — Liquid Glass가 문제를 일으킬 때의 킬스위치)
     "glass_enabled": True,
-    "panel_corner_radius": 16.0,
+    # "regular"(frosted — 가독성 유지) 또는 "clear"(최대 투명도)
+    "glass_style": "regular",
+    # History 창 본체 glass 위에 깔리는 배경 틴트의 불투명도 (0=완전 클리어)
+    "glass_window_tint_alpha": 0.5,
+    # Spotlight/제어 센터급 큰 둥근 모서리 (사용자 피드백, M8 폴리시)
+    "panel_corner_radius": 26.0,
     "panel_fade_duration": 0.15,
     # follow-up 대화 깊이: 원래 질문/답 + N개의 추가 질문/답 쌍, 오래된 쌍부터 삭제
     "followup_max_turns": 5,
@@ -121,6 +128,14 @@ DEFAULTS = {
 # on-disk value still equals a stale default the user never customized it —
 # drop it and let the current default apply. Customized values are never touched.
 _SUPERSEDED_DEFAULTS = {
+    # M8 폴리시: clear 전면 적용이 과해서 regular+틴트로 후퇴 (사용자 피드백)
+    "glass_style": ("clear",),
+    "panel_corner_radius": (16.0,),
+    # M8 폴리시: 상자 1.3배 확대 — 옛 기본값이 저장돼 있으면 새 값으로
+    "panel_width": (420.0,),
+    "panel_height": (260.0,),
+    "panel_min_height": (120.0,),
+    "panel_height_expanded": (420.0,),
     "system_prompt_text": (
         "너는 한국어로 답하는 간결한 해설가다. 선택된 텍스트의 핵심을 3~5문장으로 "
         "설명하고, 전문용어는 짧게 풀어줘. 군더더기 금지.",

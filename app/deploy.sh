@@ -22,6 +22,8 @@ LEGACY_LABEL=com.hotkeyexplain.app
 
 mkdir -p "$DEST_DIR" "$LOG_DIR"
 cp "$SRC_DIR"/*.py "$SRC_DIR/requirements.txt" "$DEST_DIR/"
+rm -rf "$DEST_DIR/assets"
+cp -R "$SRC_DIR/assets" "$DEST_DIR/assets"  # icons (M8)
 
 if [ ! -d "$DEST_DIR/.venv" ]; then
   "$PY" -m venv "$DEST_DIR/.venv"

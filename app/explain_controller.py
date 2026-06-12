@@ -291,23 +291,32 @@ class ExplainController:
                 prev.wait(timeout=1)  # two -i overlays can't coexist
             except Exception:
                 pass
-        png = capture_region(
+        png, center = capture_region(
             self.config,
             proc_holder=self._setCaptureProc,
             debug_rect=os.environ.get("HE_DEBUG_REGION_RECT"),
         )
         if png is None or handle.cancelled:
             return  # Esc / preempted / capture-to-clipboard — silent no-op
-        # selection just ended; the mouse sits at its end point
-        loc = CGEventGetLocation(CGEventCreate(None))
+        if center is not None:
+            # panel centered on the captured region (M8 polish) — not stuck
+            # small under the drag's end point
+            anchor, centered = center, True
+        else:
+            # window mode / click: selection rect unknown — fall back to the
+            # mouse position where the capture ended
+            loc = CGEventGetLocation(CGEventCreate(None))
+            anchor, centered = (loc.x, loc.y), False
         self._runImage(
-            gen, handle, (loc.x, loc.y),
-            str(self.config.get("user_prompt_image")), png,
+            gen, handle, anchor,
+            str(self.config.get("user_prompt_image")), png, centered,
         )
 
-    def _runImage(self, gen, handle, cursor_tl, user_text, png):
+    def _runImage(self, gen, handle, cursor_tl, user_text, png,
+                  centered=False):
         """Vision request tail shared by region capture and history re-ask."""
-        self._onMain(gen, self.panel.beginSessionAt_, cursor_tl)
+        self._onMain(gen, self.panel.beginSessionAt_centered_, cursor_tl,
+                     centered)
         suffix, max_tokens, detail = self._detail()
         messages = [
             {"role": "system",

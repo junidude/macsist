@@ -1,5 +1,7 @@
 """StatusItemController — menu bar status item and menu."""
 
+import pathlib
+
 import objc
 from AppKit import (
     NSImage,
@@ -9,6 +11,7 @@ from AppKit import (
     NSStatusBar,
     NSVariableStatusItemLength,
 )
+from Foundation import NSMakeSize
 
 from main_window import MainWindowController
 
@@ -19,6 +22,24 @@ _SERVER_STATES = {
     "loading": ("ellipsis.bubble", "M…", "서버: 모델 로딩 중…"),
     "down":    ("exclamationmark.bubble", "M!", "서버: 연결 안 됨"),
 }
+
+_MENUBAR_ICON_PATH = (
+    pathlib.Path(__file__).parent / "assets" / "macsist-menubarTemplate.pdf"
+)
+
+
+def _load_menubar_icon():
+    """The custom Macsist template icon (user asset) — shown while the
+    server is healthy; alert states keep their SF-Symbol bubbles so the
+    at-a-glance state survives (M5 AC)."""
+    if not _MENUBAR_ICON_PATH.exists():
+        return None
+    icon = NSImage.alloc().initWithContentsOfFile_(str(_MENUBAR_ICON_PATH))
+    if icon is None:
+        return None
+    icon.setSize_(NSMakeSize(18.0, 18.0))
+    icon.setTemplate_(True)  # adapts to light/dark menu bars
+    return icon
 
 
 class StatusItemController(NSObject):
@@ -103,12 +124,19 @@ class StatusItemController(NSObject):
             state, _SERVER_STATES["unknown"]
         )
         self.server_status_item.setTitle_(status_line)
-        icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            symbol, "Macsist"
-        )
+        # healthy → the custom Macsist icon; loading/down keep the SF-Symbol
+        # alert bubbles so the state is visible at a glance (M5 AC)
+        icon = None
+        if state in ("ok", "unknown"):
+            icon = _load_menubar_icon()
+        if icon is None:
+            icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+                symbol, "Macsist"
+            )
+            if icon is not None:
+                icon.setTemplate_(True)
         button = self.status_item.button()
         if icon is not None:
-            icon.setTemplate_(True)
             button.setImage_(icon)
             button.setTitle_("")
         else:

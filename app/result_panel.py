@@ -73,8 +73,8 @@ except ImportError:
     _CORNER_CONTINUOUS = "continuous"
 
 _ESC_KEYCODE = 53
-_PADDING = 10.0
-_INPUT_HEIGHT = 26.0
+_PADDING = 14.0  # Spotlight-like airy inset (M8 polish)
+_INPUT_HEIGHT = 30.0
 _INPUT_GAP = 6.0
 INPUT_PLACEHOLDER = "이어서 질문…"
 
@@ -129,6 +129,7 @@ class ResultPanelController(NSObject):
         self._backdrop = None
         self._fade_gen = 0  # cancels a pending fade-out orderOut on re-show
         self._height_capped = False  # auto-height hit the cap (short-circuit)
+        self._needs_rebuild = False  # settings saved → rebuild on next show
         self._global_monitor = None
         self._local_monitor = None
         self._text_attrs = None
@@ -140,7 +141,12 @@ class ResultPanelController(NSObject):
 
     def beginSessionAt_(self, cursor_tl):
         """Clear, reposition near the cursor, show a streaming placeholder."""
-        self._presentAt_(cursor_tl)
+        self.beginSessionAt_centered_(cursor_tl, False)
+
+    def beginSessionAt_centered_(self, anchor_tl, centered):
+        """centered=True: the panel's CENTER lands on anchor_tl (region mode —
+        the anchor is the captured selection's midpoint, M8 polish)."""
+        self._presentAt_centered_(anchor_tl, centered)
         self._setText_attrs_("…", self._message_attrs)
         self._ph_start = 0
         self._placeholder = True
@@ -245,6 +251,13 @@ class ResultPanelController(NSObject):
         if self.on_followup is not None:
             self.on_followup(text)
 
+    def markDirty(self):
+        """Settings saved (panel size/font/glass changed): tear the panel
+        down at the START of the next session — never mid-stream, the live
+        text view may still be receiving chunks."""
+        self._needs_rebuild = True
+        print("panel marked for rebuild (settings saved)", flush=True)
+
     def dismiss(self):
         """User-initiated dismiss (Esc / click-away) — also stops the stream.
         M8: fades out over panel_fade_duration, EXCEPT while the panel is key —
@@ -334,7 +347,9 @@ class ResultPanelController(NSObject):
             NSMakeRect(_PADDING, _PADDING, width - 2 * _PADDING, _INPUT_HEIGHT)
         )
         field.setPlaceholderString_(INPUT_PLACEHOLDER)
-        field.setFont_(NSFont.systemFontOfSize_(13.0))
+        field.setFont_(
+            NSFont.systemFontOfSize_(float(self.config.get("panel_font_size")))
+        )
         field.setBezelStyle_(NSTextFieldRoundedBezel)
         field.setFocusRingType_(NSFocusRingTypeNone)
         field.setTarget_(self)
@@ -345,16 +360,17 @@ class ResultPanelController(NSObject):
         field.setHidden_(True)
         content_host.addSubview_(field)
 
+        font_size = float(self.config.get("panel_font_size"))
         self._text_attrs = {
-            NSFontAttributeName: NSFont.systemFontOfSize_(13.0),
+            NSFontAttributeName: NSFont.systemFontOfSize_(font_size),
             NSForegroundColorAttributeName: NSColor.labelColor(),
         }
         self._message_attrs = {
-            NSFontAttributeName: NSFont.systemFontOfSize_(13.0),
+            NSFontAttributeName: NSFont.systemFontOfSize_(font_size),
             NSForegroundColorAttributeName: NSColor.secondaryLabelColor(),
         }
         self._question_attrs = {
-            NSFontAttributeName: NSFont.boldSystemFontOfSize_(13.0),
+            NSFontAttributeName: NSFont.boldSystemFontOfSize_(font_size),
             NSForegroundColorAttributeName: NSColor.labelColor(),
         }
         self.panel = panel
@@ -376,6 +392,11 @@ class ResultPanelController(NSObject):
         if use_glass:
             glass = _GlassEffectView.alloc().initWithFrame_(frame)
             glass.setCornerRadius_(radius)
+            # 1 == NSGlassEffectViewStyleClear (high transparency, user
+            # feedback); anything else falls back to 0 (regular/frosted)
+            glass.setStyle_(
+                1 if str(self.config.get("glass_style")) == "clear" else 0
+            )
             wrapper = NSView.alloc().initWithFrame_(frame)
             wrapper.setAutoresizingMask_(
                 NSViewWidthSizable | NSViewHeightSizable
@@ -407,11 +428,27 @@ class ResultPanelController(NSObject):
     # -- presentation ---------------------------------------------------------
 
     def _presentAt_(self, cursor_tl):
+        self._presentAt_centered_(cursor_tl, False)
+
+    def _presentAt_centered_(self, cursor_tl, centered):
         """cursor_tl: (x, y) in CG top-left-origin global coords (from the
-        pynput thread via CGEventGetLocation). Reuses the single panel instance
+        pynput thread via CGEventGetLocation). centered=False: panel hangs
+        below-right of the point (text cursor); True: panel center lands on
+        it (region capture midpoint). Reuses the single panel instance
         — a new panel per request would leak monitors and risk PyObjC lifetime
         bugs. Deliberately does NOT route through dismiss(): dismiss() cancels
         the in-flight stream, which would kill the request being presented."""
+        if self.panel is not None and self._needs_rebuild:
+            # settings changed: rebuild with the new size/font/backdrop
+            self._remove_monitors()
+            if self.panel.isVisible():
+                self.panel.orderOut_(None)
+            self.panel = None
+            self.text_view = None
+            self.input_field = None
+            self._scroll = None
+            self._backdrop = None
+        self._needs_rebuild = False
         if self.panel is None:
             self._buildPanel()
         # visibility check MUST precede _resetSessionUI (it orderOuts when key)
@@ -430,8 +467,12 @@ class ResultPanelController(NSObject):
         vf = screen.visibleFrame()
         offset = float(self.config.get("panel_cursor_offset"))
         size = self.panel.frame().size
-        ox = x + offset
-        oy = y - offset - size.height  # panel top sits just below the cursor
+        if centered:
+            ox = x - size.width / 2.0
+            oy = y - size.height / 2.0  # panel center on the region center
+        else:
+            ox = x + offset
+            oy = y - offset - size.height  # panel top sits just below the cursor
         ox = max(vf.origin.x, min(ox, vf.origin.x + vf.size.width - size.width))
         oy = max(vf.origin.y, min(oy, vf.origin.y + vf.size.height - size.height))
         self.panel.setFrameOrigin_(NSMakePoint(ox, oy))
