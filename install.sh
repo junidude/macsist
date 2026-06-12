@@ -325,7 +325,10 @@ if [[ "$(readlink "$(command -v macsist 2>/dev/null)" 2>/dev/null)" == "$CLI_SRC
     skip "macsist CLI ($(command -v macsist))"
 else
     echo "  /usr/local/bin/macsist 심링크 생성에 관리자 권한(sudo)이 필요합니다."
-    if sudo -p "  암호: " ln -sf "$CLI_SRC" /usr/local/bin/macsist 2>/dev/null; then
+    # 새 Apple Silicon 머신엔 /usr/local/bin 디렉토리 자체가 없다 (PATH엔 있음)
+    if sudo -p "  암호: " /bin/sh -c \
+            "mkdir -p /usr/local/bin && ln -sf '$CLI_SRC' /usr/local/bin/macsist" \
+            2>/dev/null; then
         ok "CLI 설치됨: /usr/local/bin/macsist"
     else
         mkdir -p "$HOME/.local/bin"
