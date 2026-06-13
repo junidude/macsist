@@ -20,6 +20,8 @@ from AppKit import (
     NSApp,
     NSAnimationContext,
     NSBackingStoreBuffered,
+    NSBox,
+    NSBoxCustom,
     NSColor,
     NSEvent,
     NSEventMaskKeyDown,
@@ -32,12 +34,10 @@ from AppKit import (
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
-    NSLineBreakByWordWrapping,
     NSObject,
     NSPanel,
     NSScreen,
-    NSTextField,
-    NSTextFieldRoundedBezel,
+    NSScrollView,
     NSTextView,
     NSView,
     NSViewHeightSizable,
@@ -117,10 +117,35 @@ class _HairlineEffectView(NSVisualEffectView):
         self.effectiveAppearance().performAsCurrentDrawingAppearance_(_apply)
 
 
-class _FollowUpField(NSTextField):
+class _FollowUpTextView(NSTextView):
+    """Chat-style composer. An NSTextView (not NSTextField) so multi-line text
+    is TOP-aligned and grows cleanly — a rounded-bezel NSTextField centers its
+    text vertically and its field editor scrolls independently, which is what
+    made earlier lines drift to the middle / scroll out of view. Draws its own
+    placeholder since NSTextView has none."""
+
+    _placeholder = ""
+
     def acceptsFirstMouse_(self, event):
         # the focusing click also places the caret in one click
         return True
+
+    def drawRect_(self, rect):
+        objc.super(_FollowUpTextView, self).drawRect_(rect)
+        if self.string() and len(self.string()) > 0:
+            return
+        if not self._placeholder:
+            return
+        inset = self.textContainerInset()
+        pad = self.textContainer().lineFragmentPadding()
+        attrs = {
+            NSFontAttributeName: self.font()
+            or NSFont.systemFontOfSize_(13.0),
+            NSForegroundColorAttributeName: NSColor.placeholderTextColor(),
+        }
+        NSAttributedString.alloc().initWithString_attributes_(
+            self._placeholder, attrs
+        ).drawAtPoint_(NSMakePoint(inset.width + pad, inset.height))
 
 
 class ResultPanelController(NSObject):
@@ -131,7 +156,9 @@ class ResultPanelController(NSObject):
         self.config = config
         self.panel = None
         self.text_view = None
-        self.input_field = None
+        self.input_field = None  # the NSTextView (focus + text)
+        self.input_box = None  # rounded container (show/hide/geometry/hit-test)
+        self.input_scroll = None  # scroll view between the box and the textview
         self.on_dismiss = None  # set by ExplainController: cancels the stream
         self.on_followup = None  # set by ExplainController: submits a follow-up
         self._placeholder = False
@@ -223,7 +250,7 @@ class ResultPanelController(NSObject):
     def showFollowUpInput(self):
         """Reveal the bottom input row (after a finished/errored explain).
         Idempotent — also called after every follow-up answer."""
-        if self.input_field is None or not self.input_field.isHidden():
+        if self.input_box is None or not self.input_box.isHidden():
             return
         self._input_height = _INPUT_HEIGHT  # always reappears as one line
         frame = self._scroll.frame()
@@ -232,10 +259,10 @@ class ResultPanelController(NSObject):
         self._scroll.setFrame_(
             NSMakeRect(frame.origin.x, bottom, frame.size.width, top - bottom)
         )
-        self.input_field.setFrame_(
+        self.input_box.setFrame_(
             NSMakeRect(_PADDING, _PADDING, frame.size.width, _INPUT_HEIGHT)
         )
-        self.input_field.setHidden_(False)
+        self.input_box.setHidden_(False)
         self._recomputeHeight()  # input row adds to the needed height
         print("follow-up input shown", flush=True)
 
@@ -261,64 +288,58 @@ class ResultPanelController(NSObject):
         self._recomputeHeight()
         self.text_view.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
 
-    def inputAction_(self, sender):
-        # Return (no Shift) in the input field — submit. Driven by the delegate
-        # (control_textView_doCommandBySelector_), not the cell's own action.
-        text = str(sender.stringValue()).strip()
+    def _submitFollowUp(self):
+        # Return (no Shift) in the input field — submit the typed question.
+        text = str(self.input_field.string()).strip()
         if not text:
             return
-        sender.setStringValue_("")  # keep focus: consecutive questions
+        self.input_field.setString_("")  # keep focus: consecutive questions
         self._setInputHeight_(_INPUT_HEIGHT)  # collapse back to one line
+        self.input_field.setNeedsDisplay_(True)  # repaint the placeholder
         if self.on_followup is not None:
             self.on_followup(text)
 
     # -- follow-up input: Return submits, Shift+Return = newline ---------------
 
-    def control_textView_doCommandBySelector_(self, control, textView, selector):
-        """Field-editor command hook (delegate). Take over Return: a bare
-        Return submits, Shift+Return inserts a real newline and grows the
-        field. Everything else (arrows, ⌥/⌘ navigation, deletes) falls through
-        to the field editor's default handling."""
+    def textView_doCommandBySelector_(self, textView, selector):
+        """NSTextView command hook (delegate). Take over Return: a bare Return
+        submits; Shift+Return falls through so the text view inserts a real
+        newline. Everything else (arrows, ⌥/⌘ navigation, deletes) is the text
+        view's default handling."""
         if selector == "insertNewline:":
             event = NSApp.currentEvent()
             if event is not None and (
                 event.modifierFlags() & NSEventModifierFlagShift
             ):
-                textView.insertNewlineIgnoringFieldEditor_(None)
-                self._adjustInputHeight()
-            else:
-                self.inputAction_(control)
+                return False  # let the text view insert the newline itself
+            self._submitFollowUp()
             return True
         return False
 
-    def controlTextDidChange_(self, note):
-        # typing/pasting/deleting may change the line count — refit the field
+    def textDidChange_(self, note):
+        # typing/pasting/deleting/newlines may change the line count — refit
         self._adjustInputHeight()
 
     def _adjustInputHeight(self):
-        """Size the input row to its content, clamped to [_INPUT_HEIGHT,
-        _INPUT_MAX_HEIGHT]. Measured off the live field editor's layout (same
-        technique as the transcript's auto-height)."""
+        """Size the input row to the text view's content, clamped to
+        [_INPUT_HEIGHT, _INPUT_MAX_HEIGHT]; past the cap the text view scrolls
+        inside the box."""
         field = self.input_field
-        if field is None or field.isHidden():
+        if field is None or self.input_box is None or self.input_box.isHidden():
             return
-        editor = field.currentEditor()
-        if editor is None:
-            return
-        lm = editor.layoutManager()
-        tc = editor.textContainer()
+        lm = field.layoutManager()
+        tc = field.textContainer()
         lm.ensureLayoutForTextContainer_(tc)
         used = lm.usedRectForTextContainer_(tc).size.height
         # The line the caret lands on right after Shift+Enter is a *trailing
         # newline* — it lives in the layout manager's extra line fragment,
-        # which usedRect does NOT include. Without counting it the field stays
-        # one line short, so the field editor scrolls the earlier lines up out
-        # of view (the reported bug). Add the extra fragment when present.
+        # which usedRect does NOT include. Count it so the box grows a full
+        # line immediately (otherwise it lags one line behind the content).
         elf = lm.extraLineFragmentRect()
         if elf.size.height > 0:
             used = max(used, elf.origin.y + elf.size.height)
-        # +12pt for the field's vertical text insets
-        desired = max(_INPUT_HEIGHT, min(used + 12.0, _INPUT_MAX_HEIGHT))
+        inset = field.textContainerInset().height
+        desired = max(_INPUT_HEIGHT, min(used + 2 * inset, _INPUT_MAX_HEIGHT))
         self._setInputHeight_(desired)
 
     def _setInputHeight_(self, height):
@@ -327,8 +348,7 @@ class ResultPanelController(NSObject):
         lengthens and the whole popup follows — like a chat composer — while
         the transcript above keeps its height. Only if the panel would run past
         the screen bottom does the transcript give up the remainder."""
-        field = self.input_field
-        if field is None or field.isHidden():
+        if self.input_box is None or self.input_box.isHidden():
             self._input_height = _INPUT_HEIGHT
             return
         if abs(height - self._input_height) < 0.5:
@@ -347,7 +367,8 @@ class ResultPanelController(NSObject):
             NSMakeRect(frame.origin.x, new_oy, frame.size.width, new_h), True
         )
         inner_w = frame.size.width - 2 * _PADDING
-        field.setFrame_(NSMakeRect(_PADDING, _PADDING, inner_w, height))
+        # box bottom-pinned; its scroll/text view autoresize within it
+        self.input_box.setFrame_(NSMakeRect(_PADDING, _PADDING, inner_w, height))
         scroll_bottom = _PADDING + height + _INPUT_GAP
         self._scroll.setFrame_(
             NSMakeRect(_PADDING, scroll_bottom, inner_w,
@@ -452,32 +473,48 @@ class ResultPanelController(NSObject):
         text_view.setDrawsBackground_(False)
         text_view.setTextContainerInset_(NSMakeSize(4, 4))
 
-        # follow-up input, bottom-pinned, hidden until a session can continue
-        field = _FollowUpField.alloc().initWithFrame_(
+        # follow-up input, bottom-pinned, hidden until a session can continue.
+        # Rounded box (background, hit-target) → scroll view → NSTextView.
+        font_size = float(self.config.get("panel_font_size"))
+        box = NSBox.alloc().initWithFrame_(
             NSMakeRect(_PADDING, _PADDING, width - 2 * _PADDING, _INPUT_HEIGHT)
         )
-        field.setPlaceholderString_(t("panel.followup_placeholder"))
-        field.setFont_(
-            NSFont.systemFontOfSize_(float(self.config.get("panel_font_size")))
-        )
-        field.setBezelStyle_(NSTextFieldRoundedBezel)
+        box.setBoxType_(NSBoxCustom)
+        box.setTitlePosition_(0)
+        box.setBorderWidth_(1.0)
+        box.setCornerRadius_(9.0)
+        box.setBorderColor_(NSColor.separatorColor())
+        box.setFillColor_(NSColor.labelColor().colorWithAlphaComponent_(0.06))
+        box.setContentViewMargins_(NSMakeSize(0, 0))
+        box.setAutoresizingMask_(NSViewWidthSizable | NSViewMaxYMargin)
+        box.setHidden_(True)
+
+        inner = box.contentView().bounds()
+        iscroll = NSScrollView.alloc().initWithFrame_(inner)
+        iscroll.setDrawsBackground_(False)
+        iscroll.setBorderType_(0)  # NSNoBorder
+        iscroll.setHasVerticalScroller_(True)
+        iscroll.setAutohidesScrollers_(True)
+        iscroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+
+        field = _FollowUpTextView.alloc().initWithFrame_(inner)
+        field._placeholder = t("panel.followup_placeholder")
+        field.setFont_(NSFont.systemFontOfSize_(font_size))
+        field.setTextColor_(NSColor.labelColor())
+        field.setDrawsBackground_(False)
+        field.setRichText_(False)
         field.setFocusRingType_(NSFocusRingTypeNone)
-        field.setTarget_(self)
-        field.setAction_("inputAction:")
-        # action on Return ONLY — end-editing on focus loss must not submit
-        field.cell().setSendsActionOnEndEditing_(False)
-        # Chat-style multi-line input: Return submits, Shift+Return inserts a
-        # newline — both driven from the delegate (control:textView:
-        # doCommandBySelector:), so the field must allow multiple wrapped lines
-        # and not let the cell end editing on Return itself.
-        field.setUsesSingleLineMode_(False)
-        field.cell().setWraps_(True)
-        field.cell().setScrollable_(False)
-        field.cell().setLineBreakMode_(NSLineBreakByWordWrapping)
+        field.setTextContainerInset_(NSMakeSize(6, 6))
+        field.setMinSize_(NSMakeSize(0, 0))
+        field.setMaxSize_(NSMakeSize(1.0e7, 1.0e7))
+        field.setVerticallyResizable_(True)
+        field.setHorizontallyResizable_(False)
+        field.textContainer().setWidthTracksTextView_(True)
+        field.setAutoresizingMask_(NSViewWidthSizable)
         field.setDelegate_(self)
-        field.setAutoresizingMask_(NSViewWidthSizable | NSViewMaxYMargin)
-        field.setHidden_(True)
-        content_host.addSubview_(field)
+        iscroll.setDocumentView_(field)
+        box.contentView().addSubview_(iscroll)
+        content_host.addSubview_(box)
 
         font_size = float(self.config.get("panel_font_size"))
         self._text_attrs = {
@@ -495,6 +532,8 @@ class ResultPanelController(NSObject):
         self.panel = panel
         self.text_view = text_view
         self.input_field = field
+        self.input_box = box
+        self.input_scroll = iscroll
         self._scroll = scroll
 
     def _buildBackdropForPanel_width_height_(self, panel, width, height):
@@ -565,6 +604,8 @@ class ResultPanelController(NSObject):
             self.panel = None
             self.text_view = None
             self.input_field = None
+            self.input_box = None
+            self.input_scroll = None
             self._scroll = None
             self._backdrop = None
         self._needs_rebuild = False
@@ -651,7 +692,7 @@ class ResultPanelController(NSObject):
         """Make the panel key Spotlight-style: keystrokes route to the input
         field but the app is never activated (NonactivatingPanel), so the
         source app keeps visual focus. The ONLY place _allow_key is set."""
-        if self.input_field is None or self.input_field.isHidden():
+        if self.input_box is None or self.input_box.isHidden():
             return
         self.panel._allow_key = True
         self.panel.makeKeyWindow()
@@ -678,14 +719,14 @@ class ResultPanelController(NSObject):
         """New session/presentation: drop key status, hide+clear the input,
         restore default panel/scroll geometry. Must NOT cancel anything
         (_presentAt_ deliberately doesn't route through dismiss())."""
-        if self.input_field is None:
+        if self.input_box is None:
             return
         if self.panel.isKeyWindow():
             self.panel.makeFirstResponder_(None)
             self.panel.orderOut_(None)  # _presentAt_ re-shows right after
         self.panel._allow_key = False
-        self.input_field.setStringValue_("")
-        self.input_field.setHidden_(True)
+        self.input_field.setString_("")
+        self.input_box.setHidden_(True)
         width = float(self.config.get("panel_width"))
         height = float(self.config.get("panel_min_height"))
         frame = self.panel.frame()
@@ -735,7 +776,7 @@ class ResultPanelController(NSObject):
         used = lm.usedRectForTextContainer_(tc)
         inset = self.text_view.textContainerInset()
         needed = used.size.height + 2 * inset.height + 2 * _PADDING
-        if self.input_field is not None and not self.input_field.isHidden():
+        if self.input_box is not None and not self.input_box.isHidden():
             needed += self._input_height + _INPUT_GAP
         cap = float(
             self.config.get(
@@ -759,9 +800,9 @@ class ResultPanelController(NSObject):
         print(f"panel height -> {new_h:.0f}", flush=True)
 
     def _isInputDescendant_(self, view):
-        # the field editor lives inside the field's view tree while editing
+        # the text view / scroller live inside the input box's view tree
         while view is not None:
-            if view is self.input_field:
+            if view is self.input_box:
                 return True
             view = view.superview()
         return False
@@ -820,8 +861,9 @@ class ResultPanelController(NSObject):
                 ):
                     return event  # mid-IME composition: Esc cancels the 조합
                 # first Esc: clear + leave the field, do NOT dismiss
-                self.input_field.setStringValue_("")
+                self.input_field.setString_("")
                 self._setInputHeight_(_INPUT_HEIGHT)  # collapse multi-line input
+                self.input_field.setNeedsDisplay_(True)  # repaint placeholder
                 self._unfocusInput()
                 return None  # swallow — field editor must not also see it
             self._maybeDismissForEvent_(event)
@@ -835,8 +877,8 @@ class ResultPanelController(NSObject):
         ):
             hit = self.panel.contentView().hitTest_(event.locationInWindow())
             if (
-                self.input_field is not None
-                and not self.input_field.isHidden()
+                self.input_box is not None
+                and not self.input_box.isHidden()
                 and self._isInputDescendant_(hit)
             ):
                 # deterministic focus: don't rely on first-click auto-keying
