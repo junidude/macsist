@@ -33,13 +33,15 @@ FONT_UI = 14.0  # buttons, switch labels, row titles
 FONT_SMALL = 12.0  # captions, descriptions
 
 
-# Standard editing key equivalents (⌘C/⌘V/⌘X copy/paste/cut, ⌘Z/⇧⌘Z
-# undo/redo) for text fields. An Accessory app has no Edit menu to provide
-# them, and NSMenu key equivalents match by *character* anyway — which breaks
-# under the Korean 2-set layout (⌘C reports 'ㅊ', hard rule #1). So we match by
-# virtual keycode and drive the actions down the responder chain ourselves.
-# keyCodes are kVK_ANSI_* : C=8, V=9, X=7, Z=6.
-_EDIT_ACTION_BY_KEYCODE = {8: "copy:", 9: "paste:", 7: "cut:"}
+# Standard editing key equivalents (⌘A select-all, ⌘C/⌘V/⌘X copy/paste/cut,
+# ⌘Z/⇧⌘Z undo/redo) for text fields. These are the Edit-menu-driven actions;
+# navigation/selection (arrows, ⌥/⌘+arrows, ⇧-selection) already work via the
+# text system's default key bindings. An Accessory app has no Edit menu to
+# provide the menu actions, and NSMenu key equivalents match by *character*
+# anyway — which breaks under the Korean 2-set layout (⌘C reports 'ㅊ', hard
+# rule #1). So we match by virtual keycode and drive the actions down the
+# responder chain ourselves. keyCodes are kVK_ANSI_* : A=0, C=8, V=9, X=7, Z=6.
+_EDIT_ACTION_BY_KEYCODE = {0: "selectAll:", 8: "copy:", 9: "paste:", 7: "cut:"}
 _KEYCODE_Z = 6
 
 
@@ -52,8 +54,8 @@ def _focused_undo_manager(window):
 
 
 def handle_edit_key_equivalent(window, event):
-    """Route ⌘C/⌘V/⌘X/⌘Z/⇧⌘Z to the window's focused text field. Returns True
-    if consumed. Call first from a window/panel's performKeyEquivalent_."""
+    """Route ⌘A/⌘C/⌘V/⌘X/⌘Z/⇧⌘Z to the window's focused text field. Returns
+    True if consumed. Call first from a window/panel's performKeyEquivalent_."""
     flags = event.modifierFlags()
     if not (flags & NSEventModifierFlagCommand):
         return False

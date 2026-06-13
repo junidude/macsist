@@ -91,7 +91,7 @@ class _NonActivatingPanel(NSPanel):
         return False
 
     def performKeyEquivalent_(self, event):
-        # While the follow-up input is focused the panel is key, so ⌘C/V/X/Z
+        # While the follow-up input is focused the panel is key, so ⌘A/C/V/X/Z
         # land here — no Edit menu exists to dispatch them (ui_kit explains).
         if handle_edit_key_equivalent(self, event):
             return True

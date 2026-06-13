@@ -150,7 +150,7 @@ def _session_transcript(session):
 
 
 class _MainWindow(NSWindow):
-    """⌘W closes the window, and ⌘C/V/X/Z/⇧⌘Z drive the focused text field.
+    """⌘W closes the window, and ⌘A/C/V/X/Z/⇧⌘Z drive the focused text field.
     An Accessory app has no main menu, so there is no Edit/Close menu item to
     provide these key equivalents — handle them here. Match by keyCode (⌘W is
     kVK_ANSI_W = 13), never by character: under the Korean 2-set layout ⌘W
