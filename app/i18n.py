@@ -95,6 +95,19 @@ STRINGS = {
         # result panel
         "panel.followup_placeholder": "이어서 질문…",
         "panel.thinking": "생각 중… ({n}자)",
+        # onboarding (M13 — first run of a downloaded .app)
+        "onboard.title": "Macsist에 오신 걸 환영합니다",
+        "onboard.body": "Macsist는 연결할 모델이 필요합니다. 어떻게 사용하시겠어요?",
+        "onboard.external": "외부 API 사용",
+        "onboard.local": "로컬 모델 실행",
+        "onboard.later": "나중에",
+        "onboard.local_title": "로컬 모델 설정",
+        "onboard.local_body": (
+            "로컬 모델은 Macsist 자체 서버로 동작합니다. 프로젝트에서 설치하세요:\n\n"
+            "  git clone https://github.com/junidude/macsist.git\n"
+            "  cd macsist && ./install.sh\n\n"
+            "전체 안내: https://github.com/junidude/macsist"
+        ),
         # history window
         "history.mode_text": "텍스트",
         "history.mode_region": "화면",
@@ -252,6 +265,19 @@ STRINGS = {
         "errors.bad_sse": "The LLM server sent malformed SSE.",
         "panel.followup_placeholder": "Ask a follow-up…",
         "panel.thinking": "Thinking… ({n} chars)",
+        "onboard.title": "Welcome to Macsist",
+        "onboard.body": "Macsist needs a model to connect to. How would you like to run it?",
+        "onboard.external": "Use an external API",
+        "onboard.local": "Run a local model",
+        "onboard.later": "Later",
+        "onboard.local_title": "Set up a local model",
+        "onboard.local_body": (
+            "A local model runs through Macsist's own server. Install it from "
+            "the project:\n\n"
+            "  git clone https://github.com/junidude/macsist.git\n"
+            "  cd macsist && ./install.sh\n\n"
+            "Full guide: https://github.com/junidude/macsist"
+        ),
         "history.mode_text": "Text",
         "history.mode_region": "Screen",
         "history.mode_followup": "Follow-up",
@@ -385,6 +411,18 @@ STRINGS = {
         "errors.bad_sse": "LLM 服务器发送了无效的 SSE 格式。",
         "panel.followup_placeholder": "继续提问…",
         "panel.thinking": "思考中…（{n} 字）",
+        "onboard.title": "欢迎使用 Macsist",
+        "onboard.body": "Macsist 需要一个可连接的模型。你想如何运行它？",
+        "onboard.external": "使用外部 API",
+        "onboard.local": "运行本地模型",
+        "onboard.later": "稍后",
+        "onboard.local_title": "设置本地模型",
+        "onboard.local_body": (
+            "本地模型通过 Macsist 自带的服务器运行。从项目安装：\n\n"
+            "  git clone https://github.com/junidude/macsist.git\n"
+            "  cd macsist && ./install.sh\n\n"
+            "完整指南：https://github.com/junidude/macsist"
+        ),
         "history.mode_text": "文本",
         "history.mode_region": "屏幕",
         "history.mode_followup": "追问",
@@ -518,6 +556,19 @@ STRINGS = {
         "errors.bad_sse": "LLM サーバーが不正な SSE 形式を送信しました。",
         "panel.followup_placeholder": "続けて質問…",
         "panel.thinking": "思考中…（{n}文字）",
+        "onboard.title": "Macsist へようこそ",
+        "onboard.body": "Macsist には接続するモデルが必要です。どのように動かしますか？",
+        "onboard.external": "外部 API を使う",
+        "onboard.local": "ローカルモデルを動かす",
+        "onboard.later": "あとで",
+        "onboard.local_title": "ローカルモデルの設定",
+        "onboard.local_body": (
+            "ローカルモデルは Macsist 自身のサーバーで動作します。プロジェクトから"
+            "インストールしてください：\n\n"
+            "  git clone https://github.com/junidude/macsist.git\n"
+            "  cd macsist && ./install.sh\n\n"
+            "詳しい手順：https://github.com/junidude/macsist"
+        ),
         "history.mode_text": "テキスト",
         "history.mode_region": "画面",
         "history.mode_followup": "追加質問",
@@ -651,6 +702,19 @@ STRINGS = {
         "errors.bad_sse": "Le serveur LLM a envoyé un flux SSE invalide.",
         "panel.followup_placeholder": "Poser une question de suivi…",
         "panel.thinking": "Réflexion… ({n} caractères)",
+        "onboard.title": "Bienvenue dans Macsist",
+        "onboard.body": "Macsist a besoin d'un modèle auquel se connecter. Comment voulez-vous l'exécuter ?",
+        "onboard.external": "Utiliser une API externe",
+        "onboard.local": "Exécuter un modèle local",
+        "onboard.later": "Plus tard",
+        "onboard.local_title": "Configurer un modèle local",
+        "onboard.local_body": (
+            "Un modèle local fonctionne via le serveur de Macsist. Installez-le "
+            "depuis le projet :\n\n"
+            "  git clone https://github.com/junidude/macsist.git\n"
+            "  cd macsist && ./install.sh\n\n"
+            "Guide complet : https://github.com/junidude/macsist"
+        ),
         "history.mode_text": "Texte",
         "history.mode_region": "Écran",
         "history.mode_followup": "Suivi",
@@ -784,6 +848,19 @@ STRINGS = {
         "errors.bad_sse": "Der LLM-Server hat ungültiges SSE gesendet.",
         "panel.followup_placeholder": "Nachfrage stellen…",
         "panel.thinking": "Denkt nach… ({n} Zeichen)",
+        "onboard.title": "Willkommen bei Macsist",
+        "onboard.body": "Macsist braucht ein Modell zum Verbinden. Wie möchten Sie es betreiben?",
+        "onboard.external": "Externe API verwenden",
+        "onboard.local": "Lokales Modell ausführen",
+        "onboard.later": "Später",
+        "onboard.local_title": "Lokales Modell einrichten",
+        "onboard.local_body": (
+            "Ein lokales Modell läuft über Macsists eigenen Server. Installieren "
+            "Sie es aus dem Projekt:\n\n"
+            "  git clone https://github.com/junidude/macsist.git\n"
+            "  cd macsist && ./install.sh\n\n"
+            "Vollständige Anleitung: https://github.com/junidude/macsist"
+        ),
         "history.mode_text": "Text",
         "history.mode_region": "Bildschirm",
         "history.mode_followup": "Nachfrage",

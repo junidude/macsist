@@ -22,6 +22,9 @@ import os
 
 import objc
 from AppKit import (
+    NSAlert,
+    NSAlertFirstButtonReturn,
+    NSAlertSecondButtonReturn,
     NSApp,
     NSApplicationActivationPolicyAccessory,
     NSApplicationActivationPolicyRegular,
@@ -82,6 +85,7 @@ from Foundation import (
     NSMutableAttributedString,
 )
 
+from config import asset_dir
 from i18n import current_language, t
 from settings_window import SettingsPaneController, pane_min_size
 from ui_kit import (
@@ -290,6 +294,39 @@ class MainWindowController(NSObject):
 
     def showSettings(self):
         self._show_("settings")
+
+    def runOnboardingIfNeeded(self):
+        """First run of a downloaded .app (M13): the user hasn't picked a
+        backend yet, so guide them. External API → land on the Settings
+        Connection pane (tested entry UI); Local → show the install command.
+        Marked done either way so it shows exactly once."""
+        if bool(self.config.get("onboarded")):
+            return
+        print("onboarding: first run — no backend configured yet", flush=True)
+        self.showSettings()  # brings the app forward; pane is ready behind the dialog
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(t("onboard.title"))
+        alert.setInformativeText_(t("onboard.body"))
+        alert.addButtonWithTitle_(t("onboard.external"))  # first = default
+        alert.addButtonWithTitle_(t("onboard.local"))
+        alert.addButtonWithTitle_(t("onboard.later"))
+        icon = NSImage.alloc().initWithContentsOfFile_(
+            str(asset_dir() / "macsist-1024.png")
+        )
+        if icon is not None:
+            alert.setIcon_(icon)
+        choice = alert.runModal()
+        self.config.set("onboarded", True)
+        self.config.save()
+        print(f"onboarding: choice={int(choice)}", flush=True)
+        if choice == NSAlertSecondButtonReturn:  # local model
+            info = NSAlert.alloc().init()
+            info.setMessageText_(t("onboard.local_title"))
+            info.setInformativeText_(t("onboard.local_body"))
+            if icon is not None:
+                info.setIcon_(icon)
+            info.runModal()
+        # external (first) / later (third): the Connection pane is already shown
 
     def toggleHistory(self):
         """Global hotkey (main thread via callAfter): show the History tab,

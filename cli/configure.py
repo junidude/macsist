@@ -126,6 +126,7 @@ def cmd_set_local_provider(args):
         local["vision_model"] = args.vlm_model
     store.set("providers", providers)
     store.set("active_provider", local["name"])
+    store.set("onboarded", True)  # installer configured a backend (M13)
     store.save()
     return _emit({"saved": True, "provider": local["name"],
                   "explain_model": local["explain_model"],
@@ -155,6 +156,7 @@ def cmd_set_api_provider(args):
         entry["api_key_env_or_value"] = ref
     store.set("providers", providers)
     store.set("active_provider", args.name)
+    store.set("onboarded", True)  # installer configured a backend (M13)
     store.save()
     return _emit({"saved": True, "provider": args.name,
                   "key_account": entry.get("api_key_env_or_value", "")})

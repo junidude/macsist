@@ -311,6 +311,9 @@ def main():
             float(audit), _ui_auditor, "audit:", None, True
         )
         print(f"HE_DEBUG_UI_AUDIT: every {audit}s", flush=True)
+    # M13: first run of a downloaded .app — guide the user to pick a backend
+    # (external API / local). No-op once onboarded; install.sh marks it done.
+    AppHelper.callAfter(main_window.runOnboardingIfNeeded)
     provider = config.active_provider()
     print(
         "Macsist started (menu bar). Provider:",

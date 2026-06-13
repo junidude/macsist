@@ -56,6 +56,11 @@ DEFAULTS = {
         },
     ],
     "active_provider": "로컬 서버",
+    # First-run onboarding (M13): a fresh config (downloaded .app, no install.sh)
+    # starts False so the app guides the user to pick a backend. install.sh marks
+    # it True via cli/configure.py, and any pre-existing config is grandfathered
+    # to True at load — so onboarding only ever shows a truly fresh download.
+    "onboarded": False,
     "alt_model": "mlx-community/Gemma-4-12B-4bit",
     "agent_model": "mlx-community/Qwen3.6-27B-4bit",
     # M11: UI + LLM output language (i18n.LANGUAGES). The prompt keys
@@ -212,6 +217,9 @@ class ConfigStore:
             for key in _LANG_KEYS:
                 if key in on_disk and on_disk[key] in i18n.all_prompt_defaults(key):
                     del on_disk[key]  # shipped default of some language, not custom
+            # Grandfather pre-M13 configs: a config that already exists on disk
+            # belongs to a set-up user — never show them onboarding.
+            on_disk.setdefault("onboarded", True)
             migrated = _migrate_providers(on_disk)
             self._data = {**DEFAULTS, **on_disk}
             if migrated:
