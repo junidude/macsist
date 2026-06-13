@@ -17,6 +17,7 @@ All methods are main-thread only (callers marshal via AppHelper.callAfter).
 
 import objc
 from AppKit import (
+    NSApp,
     NSAnimationContext,
     NSBackingStoreBuffered,
     NSColor,
@@ -24,12 +25,14 @@ from AppKit import (
     NSEventMaskKeyDown,
     NSEventMaskLeftMouseDown,
     NSEventMaskRightMouseDown,
+    NSEventModifierFlagShift,
     NSEventTypeKeyDown,
     NSFloatingWindowLevel,
     NSFocusRingTypeNone,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSLineBreakByWordWrapping,
     NSObject,
     NSPanel,
     NSScreen,
@@ -77,7 +80,8 @@ from ui_kit import handle_edit_key_equivalent
 
 _ESC_KEYCODE = 53
 _PADDING = 14.0  # Spotlight-like airy inset (M8 polish)
-_INPUT_HEIGHT = 30.0
+_INPUT_HEIGHT = 30.0  # one-line input row
+_INPUT_MAX_HEIGHT = 108.0  # ~5 lines; Shift+Enter grows the field up to this
 _INPUT_GAP = 6.0
 
 
@@ -134,6 +138,7 @@ class ResultPanelController(NSObject):
         self._ph_start = 0  # placeholder is always the TAIL of the storage
         self._followup_mode = False
         self._expanded = False
+        self._input_height = _INPUT_HEIGHT  # grows with Shift+Enter newlines
         self._scroll = None
         self._backdrop = None
         self._fade_gen = 0  # cancels a pending fade-out orderOut on re-show
@@ -220,8 +225,9 @@ class ResultPanelController(NSObject):
         Idempotent — also called after every follow-up answer."""
         if self.input_field is None or not self.input_field.isHidden():
             return
+        self._input_height = _INPUT_HEIGHT  # always reappears as one line
         frame = self._scroll.frame()
-        bottom = _PADDING + _INPUT_HEIGHT + _INPUT_GAP
+        bottom = _PADDING + self._input_height + _INPUT_GAP
         top = frame.origin.y + frame.size.height
         self._scroll.setFrame_(
             NSMakeRect(frame.origin.x, bottom, frame.size.width, top - bottom)
@@ -253,13 +259,77 @@ class ResultPanelController(NSObject):
         self.text_view.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
 
     def inputAction_(self, sender):
-        # Return key in the input field (sendsActionOnEndEditing is off).
+        # Return (no Shift) in the input field — submit. Driven by the delegate
+        # (control_textView_doCommandBySelector_), not the cell's own action.
         text = str(sender.stringValue()).strip()
         if not text:
             return
         sender.setStringValue_("")  # keep focus: consecutive questions
+        self._setInputHeight_(_INPUT_HEIGHT)  # collapse back to one line
         if self.on_followup is not None:
             self.on_followup(text)
+
+    # -- follow-up input: Return submits, Shift+Return = newline ---------------
+
+    def control_textView_doCommandBySelector_(self, control, textView, selector):
+        """Field-editor command hook (delegate). Take over Return: a bare
+        Return submits, Shift+Return inserts a real newline and grows the
+        field. Everything else (arrows, ⌥/⌘ navigation, deletes) falls through
+        to the field editor's default handling."""
+        if selector == "insertNewline:":
+            event = NSApp.currentEvent()
+            if event is not None and (
+                event.modifierFlags() & NSEventModifierFlagShift
+            ):
+                textView.insertNewlineIgnoringFieldEditor_(None)
+                self._adjustInputHeight()
+            else:
+                self.inputAction_(control)
+            return True
+        return False
+
+    def controlTextDidChange_(self, note):
+        # typing/pasting/deleting may change the line count — refit the field
+        self._adjustInputHeight()
+
+    def _adjustInputHeight(self):
+        """Size the input row to its content, clamped to [_INPUT_HEIGHT,
+        _INPUT_MAX_HEIGHT]. Measured off the live field editor's layout (same
+        technique as the transcript's auto-height)."""
+        field = self.input_field
+        if field is None or field.isHidden():
+            return
+        editor = field.currentEditor()
+        if editor is None:
+            return
+        lm = editor.layoutManager()
+        tc = editor.textContainer()
+        lm.ensureLayoutForTextContainer_(tc)
+        used = lm.usedRectForTextContainer_(tc).size.height
+        # the rounded bezel insets the field editor ~6pt top+bottom
+        desired = max(_INPUT_HEIGHT, min(used + 12.0, _INPUT_MAX_HEIGHT))
+        self._setInputHeight_(desired)
+
+    def _setInputHeight_(self, height):
+        """Apply a new input-row height: the row is bottom-pinned, so it grows
+        upward and the transcript scroll view above it shrinks to match (the
+        panel's outer height is untouched — the transcript just scrolls)."""
+        field = self.input_field
+        if field is None or field.isHidden():
+            self._input_height = _INPUT_HEIGHT
+            return
+        if abs(height - self._input_height) < 0.5:
+            return
+        fr = field.frame()
+        field.setFrame_(NSMakeRect(fr.origin.x, _PADDING, fr.size.width, height))
+        sf = self._scroll.frame()
+        scroll_top = sf.origin.y + sf.size.height
+        new_bottom = _PADDING + height + _INPUT_GAP
+        self._scroll.setFrame_(
+            NSMakeRect(sf.origin.x, new_bottom, sf.size.width,
+                       max(20.0, scroll_top - new_bottom))
+        )
+        self._input_height = height
 
     def markDirty(self):
         """Settings saved (panel size/font/glass changed): tear the panel
@@ -366,6 +436,15 @@ class ResultPanelController(NSObject):
         field.setAction_("inputAction:")
         # action on Return ONLY — end-editing on focus loss must not submit
         field.cell().setSendsActionOnEndEditing_(False)
+        # Chat-style multi-line input: Return submits, Shift+Return inserts a
+        # newline — both driven from the delegate (control:textView:
+        # doCommandBySelector:), so the field must allow multiple wrapped lines
+        # and not let the cell end editing on Return itself.
+        field.setUsesSingleLineMode_(False)
+        field.cell().setWraps_(True)
+        field.cell().setScrollable_(False)
+        field.cell().setLineBreakMode_(NSLineBreakByWordWrapping)
+        field.setDelegate_(self)
         field.setAutoresizingMask_(NSViewWidthSizable | NSViewMaxYMargin)
         field.setHidden_(True)
         content_host.addSubview_(field)
@@ -597,6 +676,7 @@ class ResultPanelController(NSObject):
         )
         self._followup_mode = False
         self._expanded = False
+        self._input_height = _INPUT_HEIGHT
         self._height_capped = False
         self._ph_start = 0
 
@@ -626,7 +706,7 @@ class ResultPanelController(NSObject):
         inset = self.text_view.textContainerInset()
         needed = used.size.height + 2 * inset.height + 2 * _PADDING
         if self.input_field is not None and not self.input_field.isHidden():
-            needed += _INPUT_HEIGHT + _INPUT_GAP
+            needed += self._input_height + _INPUT_GAP
         cap = float(
             self.config.get(
                 "panel_height_expanded" if self._expanded else "panel_height"
@@ -711,6 +791,7 @@ class ResultPanelController(NSObject):
                     return event  # mid-IME composition: Esc cancels the 조합
                 # first Esc: clear + leave the field, do NOT dismiss
                 self.input_field.setStringValue_("")
+                self._setInputHeight_(_INPUT_HEIGHT)  # collapse multi-line input
                 self._unfocusInput()
                 return None  # swallow — field editor must not also see it
             self._maybeDismissForEvent_(event)
