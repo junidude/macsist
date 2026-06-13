@@ -73,6 +73,7 @@ except ImportError:
     _CORNER_CONTINUOUS = "continuous"
 
 from i18n import t
+from ui_kit import handle_edit_key_equivalent
 
 _ESC_KEYCODE = 53
 _PADDING = 14.0  # Spotlight-like airy inset (M8 polish)
@@ -88,6 +89,13 @@ class _NonActivatingPanel(NSPanel):
 
     def canBecomeMainWindow(self):
         return False
+
+    def performKeyEquivalent_(self, event):
+        # While the follow-up input is focused the panel is key, so ⌘C/V/X/Z
+        # land here — no Edit menu exists to dispatch them (ui_kit explains).
+        if handle_edit_key_equivalent(self, event):
+            return True
+        return objc.super(_NonActivatingPanel, self).performKeyEquivalent_(event)
 
 
 class _HairlineEffectView(NSVisualEffectView):

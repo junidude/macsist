@@ -7,10 +7,15 @@ so settings_window must not import main_window back).
 
 import objc
 from AppKit import (
+    NSApplication,
     NSBox,
     NSBoxCustom,
     NSButton,
     NSColor,
+    NSEventModifierFlagCommand,
+    NSEventModifierFlagControl,
+    NSEventModifierFlagOption,
+    NSEventModifierFlagShift,
     NSFocusRingTypeNone,
     NSFont,
     NSSecureTextField,
@@ -26,6 +31,52 @@ from Foundation import NSMakeRect, NSMakeSize
 FONT_BODY = 15.0  # 13 × 1.15 (M8 scale-up)
 FONT_UI = 14.0  # buttons, switch labels, row titles
 FONT_SMALL = 12.0  # captions, descriptions
+
+
+# Standard editing key equivalents (⌘C/⌘V/⌘X copy/paste/cut, ⌘Z/⇧⌘Z
+# undo/redo) for text fields. An Accessory app has no Edit menu to provide
+# them, and NSMenu key equivalents match by *character* anyway — which breaks
+# under the Korean 2-set layout (⌘C reports 'ㅊ', hard rule #1). So we match by
+# virtual keycode and drive the actions down the responder chain ourselves.
+# keyCodes are kVK_ANSI_* : C=8, V=9, X=7, Z=6.
+_EDIT_ACTION_BY_KEYCODE = {8: "copy:", 9: "paste:", 7: "cut:"}
+_KEYCODE_Z = 6
+
+
+def _focused_undo_manager(window):
+    responder = window.firstResponder()
+    manager = responder.undoManager() if responder is not None else None
+    # NSTextField's field editor registers edits with the window's manager;
+    # a standalone NSTextView (settings prompt areas) owns its own.
+    return manager if manager is not None else window.undoManager()
+
+
+def handle_edit_key_equivalent(window, event):
+    """Route ⌘C/⌘V/⌘X/⌘Z/⇧⌘Z to the window's focused text field. Returns True
+    if consumed. Call first from a window/panel's performKeyEquivalent_."""
+    flags = event.modifierFlags()
+    if not (flags & NSEventModifierFlagCommand):
+        return False
+    # leave ⌥/⌃ combos alone — only the bare ⌘ (+⇧ for redo) shortcuts here
+    if flags & (NSEventModifierFlagOption | NSEventModifierFlagControl):
+        return False
+    code = event.keyCode()
+    action = _EDIT_ACTION_BY_KEYCODE.get(code)
+    if action is not None:
+        # target nil → starts at the firstResponder (the field editor)
+        return bool(NSApplication.sharedApplication().sendAction_to_from_(
+            action, None, window))
+    if code == _KEYCODE_Z:
+        manager = _focused_undo_manager(window)
+        if manager is None:
+            return False
+        if flags & NSEventModifierFlagShift:
+            if manager.canRedo():
+                manager.redo()
+        elif manager.canUndo():
+            manager.undo()
+        return True
+    return False
 
 
 class FlippedView(NSView):

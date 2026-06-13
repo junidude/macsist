@@ -84,7 +84,11 @@ from Foundation import (
 
 from i18n import current_language, t
 from settings_window import SettingsPaneController, pane_min_size
-from ui_kit import FlippedView as _FlippedView, make_pill as _make_pill
+from ui_kit import (
+    FlippedView as _FlippedView,
+    handle_edit_key_equivalent as _handle_edit_key_equivalent,
+    make_pill as _make_pill,
+)
 
 # Liquid Glass (M8) — same guard as result_panel.py. Style 1 == clear
 # (NSGlassEffectViewStyleClear): the high-transparency look the user asked
@@ -146,12 +150,15 @@ def _session_transcript(session):
 
 
 class _MainWindow(NSWindow):
-    """⌘W closes the window. An Accessory app has no main menu, so there is
-    no Close menu item to provide the key equivalent — handle it here. Match
-    by keyCode (kVK_ANSI_W = 13), never by character: under the Korean 2-set
-    layout ⌘W reports 'ㅈ' (hard rule #1)."""
+    """⌘W closes the window, and ⌘C/V/X/Z/⇧⌘Z drive the focused text field.
+    An Accessory app has no main menu, so there is no Edit/Close menu item to
+    provide these key equivalents — handle them here. Match by keyCode (⌘W is
+    kVK_ANSI_W = 13), never by character: under the Korean 2-set layout ⌘W
+    reports 'ㅈ' (hard rule #1)."""
 
     def performKeyEquivalent_(self, event):
+        if _handle_edit_key_equivalent(self, event):
+            return True
         if (event.modifierFlags() & NSEventModifierFlagCommand
                 and event.keyCode() == 13):
             self.performClose_(None)
