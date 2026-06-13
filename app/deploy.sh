@@ -109,6 +109,12 @@ rm -rf "$SRC_DIR/build" "$SRC_DIR/dist"
 
 sign_bundle "$SRC_DIR/dist/Macsist.app"
 
+# BUILD_ONLY (release.sh): produce the signed bundle, skip the launchd install.
+if [ -n "${BUILD_ONLY:-}" ]; then
+  echo "Built (BUILD_ONLY): $SRC_DIR/dist/Macsist.app"
+  exit 0
+fi
+
 # ── Install: bootout → swap bundle → plist → bootstrap ──────────────────────
 mkdir -p "$SUPPORT_DIR" "$LOG_DIR"
 launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null || true
