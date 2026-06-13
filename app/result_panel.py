@@ -309,7 +309,15 @@ class ResultPanelController(NSObject):
         tc = editor.textContainer()
         lm.ensureLayoutForTextContainer_(tc)
         used = lm.usedRectForTextContainer_(tc).size.height
-        # the rounded bezel insets the field editor ~6pt top+bottom
+        # The line the caret lands on right after Shift+Enter is a *trailing
+        # newline* — it lives in the layout manager's extra line fragment,
+        # which usedRect does NOT include. Without counting it the field stays
+        # one line short, so the field editor scrolls the earlier lines up out
+        # of view (the reported bug). Add the extra fragment when present.
+        elf = lm.extraLineFragmentRect()
+        if elf.size.height > 0:
+            used = max(used, elf.origin.y + elf.size.height)
+        # +12pt for the field's vertical text insets
         desired = max(_INPUT_HEIGHT, min(used + 12.0, _INPUT_MAX_HEIGHT))
         self._setInputHeight_(desired)
 
