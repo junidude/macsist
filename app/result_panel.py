@@ -232,6 +232,9 @@ class ResultPanelController(NSObject):
         self._scroll.setFrame_(
             NSMakeRect(frame.origin.x, bottom, frame.size.width, top - bottom)
         )
+        self.input_field.setFrame_(
+            NSMakeRect(_PADDING, _PADDING, frame.size.width, _INPUT_HEIGHT)
+        )
         self.input_field.setHidden_(False)
         self._recomputeHeight()  # input row adds to the needed height
         print("follow-up input shown", flush=True)
@@ -311,25 +314,39 @@ class ResultPanelController(NSObject):
         self._setInputHeight_(desired)
 
     def _setInputHeight_(self, height):
-        """Apply a new input-row height: the row is bottom-pinned, so it grows
-        upward and the transcript scroll view above it shrinks to match (the
-        panel's outer height is untouched — the transcript just scrolls)."""
+        """Apply a new input-row height. The panel grows DOWNWARD by the delta
+        (top edge fixed, the way it hangs below the cursor) so the input box
+        lengthens and the whole popup follows — like a chat composer — while
+        the transcript above keeps its height. Only if the panel would run past
+        the screen bottom does the transcript give up the remainder."""
         field = self.input_field
         if field is None or field.isHidden():
             self._input_height = _INPUT_HEIGHT
             return
         if abs(height - self._input_height) < 0.5:
             return
-        fr = field.frame()
-        field.setFrame_(NSMakeRect(fr.origin.x, _PADDING, fr.size.width, height))
-        sf = self._scroll.frame()
-        scroll_top = sf.origin.y + sf.size.height
-        new_bottom = _PADDING + height + _INPUT_GAP
+        panel = self.panel
+        frame = panel.frame()
+        top = frame.origin.y + frame.size.height  # fixed top edge
+        screen = panel.screen() or NSScreen.mainScreen()
+        vf = screen.visibleFrame()
+        new_h = frame.size.height + (height - self._input_height)
+        new_oy = top - new_h
+        if new_oy < vf.origin.y:  # clamp at the screen bottom
+            new_oy = vf.origin.y
+            new_h = top - new_oy
+        panel.setFrame_display_(
+            NSMakeRect(frame.origin.x, new_oy, frame.size.width, new_h), True
+        )
+        inner_w = frame.size.width - 2 * _PADDING
+        field.setFrame_(NSMakeRect(_PADDING, _PADDING, inner_w, height))
+        scroll_bottom = _PADDING + height + _INPUT_GAP
         self._scroll.setFrame_(
-            NSMakeRect(sf.origin.x, new_bottom, sf.size.width,
-                       max(20.0, scroll_top - new_bottom))
+            NSMakeRect(_PADDING, scroll_bottom, inner_w,
+                       max(40.0, new_h - scroll_bottom - _PADDING))
         )
         self._input_height = height
+        print(f"input height -> {height:.0f}, panel -> {new_h:.0f}", flush=True)
 
     def markDirty(self):
         """Settings saved (panel size/font/glass changed): tear the panel
@@ -401,6 +418,11 @@ class ResultPanelController(NSObject):
         panel.setHasShadow_(True)
         # defense-in-depth only — the local monitor drives focus explicitly
         panel.setBecomesKeyOnlyIfNeeded_(True)
+        # Drag-to-move: grab the panel's background/margins (anywhere that
+        # isn't the transcript text or the input field) and reposition it —
+        # for when it covers something or sits too low. Works without keying
+        # the panel, so the never-steal-focus invariant is untouched.
+        panel.setMovableByWindowBackground_(True)
 
         content_host = self._buildBackdropForPanel_width_height_(
             panel, width, height
