@@ -2,9 +2,10 @@
 # Build a distributable Macsist.dmg for the website / GitHub Releases.
 #
 # The bundle is SELF-SIGNED (no Apple notarization), so on a downloader's Mac
-# Gatekeeper blocks the first open. The DMG ships a "READ ME FIRST" note and the
-# website should repeat it. To open once:
-#   right-click Macsist.app -> Open -> Open      (or, if macOS still refuses:)
+# Gatekeeper blocks the first open ("Apple could not verify ... malware"). The
+# DMG ships a "READ ME FIRST" note and the website repeats it. macOS 26 removed
+# the old right-click->Open bypass, so to open once:
+#   System Settings -> Privacy & Security -> "Open Anyway"   (or, in Terminal:)
 #   xattr -dr com.apple.quarantine /Applications/Macsist.app
 #
 # Prereq: brew install python@3.13 (framework build — same as app/deploy.sh).
@@ -32,17 +33,23 @@ ln -s /Applications "$STAGE/Applications"   # drag-to-install target
 cat > "$STAGE/READ ME FIRST.txt" <<'TXT'
 Macsist — how to open it the first time
 
-This build is self-signed (not notarized by Apple), so macOS Gatekeeper
-blocks it the very first time. Open it ONCE like this:
+This build is self-signed (not notarized by Apple), so the first time you open
+it macOS shows: "Apple could not verify 'Macsist' is free of malware", with
+only "Move to Trash" / "Done". This is EXPECTED — it is NOT malware.
+Do NOT click "Move to Trash".
+
+Open it ONCE like this:
 
   1) Drag Macsist into the Applications folder (icon on the right).
-  2) In Applications, right-click Macsist -> Open -> Open.
-     If macOS still refuses ("damaged" / "can't be opened"), run this in
-     Terminal once, then open it again:
+  2) On the warning dialog, click "Done".
+  3) Open System Settings -> Privacy & Security, scroll down, and click
+     "Open Anyway" next to the Macsist message, then confirm.
 
-       xattr -dr com.apple.quarantine /Applications/Macsist.app
+     (Terminal alternative, instead of step 3:
+        xattr -dr com.apple.quarantine /Applications/Macsist.app )
 
-  3) On first launch Macsist asks how to connect:
+  4) After this, Macsist opens normally on double-click. On first launch it
+     asks how to connect:
        - an external OpenAI-compatible API (paste a key — works instantly), or
        - a local model (guided server install).
      Grant Accessibility (and Screen Recording for region capture) when
@@ -69,7 +76,7 @@ Publish it:
   2) Create a GitHub Release and attach the DMG:
        gh release create v$VERSION "$DMG" "$DMG.sha256" \\
          --title "Macsist $VERSION" --notes-file - <<'NOTES'
-       Download Macsist.dmg below. First open: right-click -> Open (self-signed).
+       Download Macsist.dmg below. Self-signed: first open = System Settings -> Privacy & Security -> "Open Anyway".
        NOTES
   3) Stable download link for your website (never changes across versions):
        https://github.com/junidude/macsist/releases/latest/download/Macsist.dmg

@@ -58,7 +58,25 @@
 
 ---
 
-## ⬇️ 설치
+## ⬇️ 다운로드
+
+**그냥 앱만 받고 싶다면?** 최신 빌드를 받으세요:
+
+### → [**Macsist.dmg 다운로드**](https://github.com/junidude/macsist/releases/latest/download/Macsist.dmg)
+
+이 빌드는 **자가서명**(공증 안 함)이라 처음 열 때 macOS가 *"Apple은 'Macsist'에 악성 코드가 없음을 확인할 수 없습니다"* 라며 차단합니다 — 정상이며 악성코드가 **아닙니다**. **"휴지통으로 이동"을 누르지 마세요:**
+
+1. **Macsist**를 **응용 프로그램**으로 드래그하고, 경고창에서 **"완료"**를 누릅니다.
+2. **시스템 설정 → 개인정보 보호 및 보안**을 열고, 아래로 스크롤해 Macsist 메시지 옆 **"그래도 열기"**를 누른 뒤 확인하면 열립니다.
+   *(터미널 대안: `xattr -dr com.apple.quarantine /Applications/Macsist.app`)*
+
+그 이후로는 그냥 더블클릭으로 열립니다. 첫 실행 때 외부 API를 쓸지 로컬 모델을 쓸지 물어봅니다.
+
+---
+
+## 🛠 소스에서 설치
+
+완전한 로컬 모델 스택을 원한다면:
 
 ```bash
 git clone https://github.com/junidude/macsist.git

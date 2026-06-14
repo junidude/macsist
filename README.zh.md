@@ -58,7 +58,25 @@
 
 ---
 
-## ⬇️ 安装
+## ⬇️ 下载
+
+**只想要 App？** 下载最新版本：
+
+### → [**下载 Macsist.dmg**](https://github.com/junidude/macsist/releases/latest/download/Macsist.dmg)
+
+该版本为**自签名**（未经 Apple 公证），首次打开时 macOS 会拦截并提示 *"Apple 无法验证 'Macsist' 是否包含恶意软件"* —— 这是正常的，**并非**恶意软件。**不要点击"移到废纸篓"：**
+
+1. 把 **Macsist** 拖入**应用程序**，在弹窗上点击**"完成"**。
+2. 打开**系统设置 → 隐私与安全性**，向下滚动，点击 Macsist 提示旁的**"仍要打开"**，确认后即可打开。
+   *(终端替代方案：`xattr -dr com.apple.quarantine /Applications/Macsist.app`)*
+
+之后即可正常双击打开。首次启动时会询问使用外部 API 还是本地模型。
+
+---
+
+## 🛠 从源码安装
+
+如需完整的本地模型栈：
 
 ```bash
 git clone https://github.com/junidude/macsist.git

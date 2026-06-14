@@ -71,21 +71,27 @@ by default. Requires **macOS 26.2+ on Apple Silicon**.
 ## 6. First-open note (CRITICAL — the build is self-signed, NOT notarized)
 
 The DMG is signed with a self-signed certificate, **not** notarized by Apple, so
-Gatekeeper blocks the first launch. The site MUST show this clearly near the
-Download button (a callout, or a step list that appears after clicking
-Download). Exact instructions to surface:
+Gatekeeper blocks the first launch. **macOS 26 removed the old right-click →
+Open bypass**, so the reliable path is System Settings → Privacy & Security →
+"Open Anyway" (or clearing the quarantine xattr). The site MUST show this
+clearly near the Download button (a callout, or a step list that appears after
+clicking Download). Exact instructions to surface:
 
-> **First time you open it:** macOS will say it can't verify the developer.
-> 1. Drag **Macsist** into **Applications**.
-> 2. In Applications, **right-click Macsist → Open → Open**.
-> 3. If macOS still refuses ("damaged" / "can't be opened"), run once in
->    Terminal, then open again:
+> **First time you open it:** macOS shows *"Apple could not verify 'Macsist' is
+> free of malware"* with only **Move to Trash / Done**. This is expected
+> (self-signed) — it is **not** malware. **Don't click Move to Trash.**
+> 1. Drag **Macsist** into **Applications**, then click **Done** on the dialog.
+> 2. Open **System Settings → Privacy & Security**, scroll down, and click
+>    **"Open Anyway"** next to the Macsist message, then confirm.
+> 3. *Terminal alternative (instead of step 2):*
 >    ```
 >    xattr -dr com.apple.quarantine /Applications/Macsist.app
 >    ```
+>
+> After this, Macsist opens normally on double-click.
 
-Do not hide this — a surprised user who hits "damaged" with no explanation will
-assume the app is broken.
+Do not hide this — a surprised user who hits the malware warning with no
+explanation will assume the app is broken.
 
 ## 7. After install (set expectation, 1 line)
 

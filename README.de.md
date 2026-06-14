@@ -58,7 +58,25 @@ Markiere etwas Text — einen fremdsprachigen Satz, einen dichten Absatz, eine F
 
 ---
 
-## ⬇️ Installation
+## ⬇️ Download
+
+**Nur die App?** Laden Sie die neueste Version:
+
+### → [**Macsist.dmg herunterladen**](https://github.com/junidude/macsist/releases/latest/download/Macsist.dmg)
+
+Diese Version ist **selbstsigniert** (nicht von Apple notarisiert), daher blockiert macOS den ersten Start mit *„Apple kann ‚Macsist' nicht auf Schadsoftware überprüfen"* — das ist erwartet und **keine** Schadsoftware. **Klicken Sie nicht auf _In den Papierkorb legen_:**
+
+1. Ziehen Sie **Macsist** in **Programme** und klicken Sie im Dialog auf **„Fertig"**.
+2. Öffnen Sie **Systemeinstellungen → Datenschutz & Sicherheit**, scrollen Sie nach unten und klicken Sie neben der Macsist-Meldung auf **„Trotzdem öffnen"**, dann bestätigen — sie öffnet sich.
+   *(Terminal-Alternative: `xattr -dr com.apple.quarantine /Applications/Macsist.app`)*
+
+Danach öffnet sie sich normal per Doppelklick. Beim ersten Start fragt Macsist, ob eine externe API oder ein lokales Modell verwendet werden soll.
+
+---
+
+## 🛠 Aus dem Quellcode installieren
+
+Für den vollen lokalen Modell-Stack:
 
 ```bash
 git clone https://github.com/junidude/macsist.git
