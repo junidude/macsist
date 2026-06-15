@@ -80,11 +80,13 @@ def _last_user_text(messages):
 
 
 class ExplainController:
-    def __init__(self, config, panel, health_monitor=None, history=None):
+    def __init__(self, config, panel, health_monitor=None, history=None,
+                 assistant=None):
         self.config = config
         self.panel = panel
         self.health_monitor = health_monitor
         self.history = history  # HistoryStore (M7); appends on the main thread
+        self.assistant = assistant  # AssistantController (M14); hotkeys route here
         self.client = LLMClient(config)
         self._lock = threading.Lock()
         self._gen = 0
@@ -102,11 +104,19 @@ class ExplainController:
         self.hotkeys = HotkeyManager(self._bindings())
 
     def _bindings(self):
-        return {
+        bindings = {
             str(self.config.get("hotkey_explain_text")): self.explainTextHotkey,
             str(self.config.get("hotkey_explain_region")): self.explainRegionHotkey,
             str(self.config.get("hotkey_open_history")): self._openHistoryHotkey,
         }
+        # M14: assistant hotkeys share this one HotkeyManager (hard rule: never
+        # start a second pynput listener — rebind only).
+        if self.assistant is not None:
+            bindings[str(self.config.get("hotkey_capture_task"))] = \
+                self.assistant.captureTaskHotkey
+            bindings[str(self.config.get("hotkey_open_inbox"))] = \
+                self.assistant.openInboxHotkey
+        return bindings
 
     def _openHistoryHotkey(self):
         # pynput listener thread → the window toggle is pure AppKit

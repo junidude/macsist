@@ -122,6 +122,26 @@ FONT_SMALL = 12.0  # captions / session sublines
 FONT_UI = 14.0  # buttons, switch labels, session titles
 _SEARCH_ITEM_ID = "search"
 
+def _assistant_section(doc, y, width, title):
+    """Module-level (NOT a method): NSObject-subclass methods need selector
+    arity (project memory pyobjc-selector-arg-naming). Returns the next y."""
+    label = NSTextField.labelWithString_(title)
+    label.setFont_(NSFont.boldSystemFontOfSize_(13.0))
+    label.setTextColor_(NSColor.secondaryLabelColor())
+    label.setFrame_(NSMakeRect(8, y + 6, width - 16, 18))
+    doc.addSubview_(label)
+    return y + 30.0
+
+
+def _assistant_empty(doc, y, width, text):
+    label = NSTextField.labelWithString_(text)
+    label.setFont_(NSFont.systemFontOfSize_(12.0))
+    label.setTextColor_(NSColor.tertiaryLabelColor())
+    label.setFrame_(NSMakeRect(12, y + 2, width - 24, 18))
+    doc.addSubview_(label)
+    return y + 26.0
+
+
 def _mode_label(mode):
     key = {"text": "history.mode_text", "region": "history.mode_region",
            "followup": "history.mode_followup"}.get(mode)
@@ -275,6 +295,11 @@ class MainWindowController(NSObject):
         self.sidebar_effect = None
         self.search_field = None  # the unified toolbar's search field (M8)
         self.assistant_bridge = None  # HermesBridge, set by AssistantController
+        self.assistant_threads = None  # ThreadStore (M14)
+        self.assistant_proposals = None  # ProposalStore (M14)
+        self.on_assistant_approve = None
+        self.on_assistant_skip = None
+        self.on_assistant_snooze = None
         self.assistant_scroll = None
         self.assistant_doc = None
         self.table = None  # session list (right column)
@@ -734,46 +759,55 @@ class MainWindowController(NSObject):
         container.addSubview_(self.assistant_scroll)
 
     def refreshAssistant(self):
-        """Read the kanban board (read-only) and re-render the cards. Safe when
-        the bridge is unset / Hermes absent — renders the empty state."""
+        """Re-render the 비서 tab: work threads (M14, "어디까지 했더라") + the
+        read-only kanban board (M13). Safe when stores are unset — empty state."""
+        threads = []
+        if self.assistant_threads is not None:
+            try:
+                threads = self.assistant_threads.active()
+            except Exception as exc:
+                print(f"assistant tab: thread read error {exc!r}", flush=True)
         tasks = []
         if self.assistant_bridge is not None:
             try:
                 tasks = self.assistant_bridge.board_tasks()
-            except Exception as exc:  # a board read must never break the window
+            except Exception as exc:  # a read must never break the window
                 print(f"assistant tab: board read error {exc!r}", flush=True)
-        self._renderKanban_(tasks)
-
-    def refreshAssistantIfVisible(self):
-        """Called from AssistantController on a board change — only redraw when
-        the user is actually looking at the 작업 tab."""
-        if (self.window is not None and self.window.isVisible()
-                and self.tab_view is not None
-                and str(self.tab_view.selectedTabViewItem().identifier())
-                == "assistant"):
-            self.refreshAssistant()
-
-    def _renderKanban_(self, tasks):
         doc = self.assistant_doc
         if doc is None:
             return
         for sub in list(doc.subviews()):
             sub.removeFromSuperview()
         width = self.assistant_scroll.contentSize().width
-        if not tasks:
-            label = NSTextField.labelWithString_(t("assistant.empty"))
-            label.setFont_(NSFont.systemFontOfSize_(13.0))
-            label.setTextColor_(NSColor.secondaryLabelColor())
-            label.setFrame_(NSMakeRect(8, 12, width - 16, 20))
-            doc.setFrameSize_(NSMakeSize(width, 44))
-            doc.addSubview_(label)
-            return
-        card_h, gap = 76.0, 8.0
-        doc.setFrameSize_(NSMakeSize(width, len(tasks) * (card_h + gap) + 4))
+        th_h, task_h, gap = 88.0, 76.0, 8.0
+        total = 8.0
+        total += 30 + (len(threads) * (th_h + gap) if threads else 26)
+        total += 30 + (len(tasks) * (task_h + gap) if tasks else 26)
+        doc.setFrameSize_(NSMakeSize(width, total))
         y = 4.0
-        for task in tasks:
-            self._addKanbanCardTo_y_width_task_(doc, y, width, task)
-            y += card_h + gap
+        y = _assistant_section(doc, y, width, t("assistant.threads_title"))
+        if threads:
+            for th in threads:
+                self._addThreadCardTo_y_width_thread_(doc, y, width, th)
+                y += th_h + gap
+        else:
+            y = _assistant_empty(doc, y, width, t("assistant.no_threads"))
+        y = _assistant_section(doc, y, width, t("assistant.tasks_title"))
+        if tasks:
+            for task in tasks:
+                self._addKanbanCardTo_y_width_task_(doc, y, width, task)
+                y += task_h + gap
+        else:
+            y = _assistant_empty(doc, y, width, t("assistant.empty"))
+
+    def refreshAssistantIfVisible(self):
+        """Called from AssistantController on a change — only redraw when the
+        user is actually looking at the 비서 tab."""
+        if (self.window is not None and self.window.isVisible()
+                and self.tab_view is not None
+                and str(self.tab_view.selectedTabViewItem().identifier())
+                == "assistant"):
+            self.refreshAssistant()
 
     def _addKanbanCardTo_y_width_task_(self, doc, y, width, task):
         from datetime import datetime
@@ -836,6 +870,55 @@ class MainWindowController(NSObject):
             ft.setLineBreakMode_(NSLineBreakByTruncatingTail)
             ft.setFrame_(NSMakeRect(pad, 8, card_w - 2 * pad, 15))
             inner.addSubview_(ft)
+
+        doc.addSubview_(box)
+
+    def _addThreadCardTo_y_width_thread_(self, doc, y, width, thread):
+        from AppKit import NSLineBreakByTruncatingTail, NSTextAlignmentRight
+
+        card_w, card_h, pad = width - 8, 88.0, 12.0
+        box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
+        box.setBoxType_(NSBoxCustom)
+        box.setTitlePosition_(0)
+        box.setBorderWidth_(0.0)
+        box.setCornerRadius_(10.0)
+        box.setContentViewMargins_(NSMakeSize(0, 0))
+        box.setFillColor_(
+            NSColor.textBackgroundColor().colorWithAlphaComponent_(0.5)
+        )
+        inner = box.contentView()
+
+        title = NSTextField.labelWithString_(str(thread.get("title") or "—"))
+        title.setFont_(NSFont.boldSystemFontOfSize_(14.0))
+        title.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        title.setFrame_(NSMakeRect(pad, card_h - 28, card_w - 2 * pad - 90, 19))
+        inner.addSubview_(title)
+
+        status = str(thread.get("status") or "")
+        if status:
+            st = NSTextField.labelWithString_(status)
+            st.setFont_(NSFont.systemFontOfSize_(11.0))
+            st.setAlignment_(NSTextAlignmentRight)
+            st.setTextColor_(NSColor.secondaryLabelColor())
+            st.setFrame_(NSMakeRect(card_w - pad - 86, card_h - 27, 86, 16))
+            inner.addSubview_(st)
+
+        where = str(thread.get("where_was_i") or "").replace("\n", " ").strip()
+        if where:
+            w = NSTextField.labelWithString_("📍 " + where)
+            w.setFont_(NSFont.systemFontOfSize_(12.0))
+            w.setTextColor_(NSColor.secondaryLabelColor())
+            w.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            w.setFrame_(NSMakeRect(pad, card_h - 50, card_w - 2 * pad, 17))
+            inner.addSubview_(w)
+
+        nxt = str(thread.get("next_action") or "").replace("\n", " ").strip()
+        if nxt:
+            n = NSTextField.labelWithString_("→ " + nxt)
+            n.setFont_(NSFont.systemFontOfSize_(12.0))
+            n.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            n.setFrame_(NSMakeRect(pad, 10, card_w - 2 * pad, 17))
+            inner.addSubview_(n)
 
         doc.addSubview_(box)
 

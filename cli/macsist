@@ -7,6 +7,10 @@
 #   macsist logs [app|server] [-f]
 #   macsist settings|history   open the main window (distributed notification)
 #   macsist tasks              show the Hermes kanban board (read-only, M13)
+#   macsist inbox              show the assistant inbox (M14)
+#   macsist propose "<text>"   ask the assistant to consider a task (M14)
+#   macsist approve <id>       approve a pending proposal (M14)
+#   macsist scan               run one proactive cycle now (M14)
 #   macsist doctor             full diagnosis (✓/✗ per check)
 #   macsist update             git pull + redeploy
 #
@@ -178,7 +182,7 @@ post_notification() {
         return 1
     fi
     agent_loaded "$APP_LABEL" || echo "(앱이 실행 중이 아닙니다 — macsist start app)" >&2
-    "$NOTIFY_BIN" "$1"
+    "$NOTIFY_BIN" "$1" ${2+"$2"}
 }
 
 cmd_tasks() {  # M13: read-only Hermes kanban board + focus the 작업 tab if running
@@ -186,6 +190,29 @@ cmd_tasks() {  # M13: read-only Hermes kanban board + focus the 작업 tab if ru
     if [[ -x "$NOTIFY_BIN" ]] && agent_loaded "$APP_LABEL"; then
         "$NOTIFY_BIN" "com.macsist.assistant.showTasks" >/dev/null 2>&1 || true
     fi
+}
+
+cmd_inbox() {  # M14: print the assistant inbox + focus it in the app
+    "$(pybin)" "$CONFIGURE" inbox || echo "받은 작업함을 읽을 수 없습니다"
+    if [[ -x "$NOTIFY_BIN" ]] && agent_loaded "$APP_LABEL"; then
+        "$NOTIFY_BIN" "com.macsist.assistant.inbox" >/dev/null 2>&1 || true
+    fi
+}
+
+cmd_propose() {  # M14: ask the assistant to consider a task (app must be running)
+    local text="$*"
+    [[ -n "$text" ]] || { echo "사용법: macsist propose \"<할 일/메모>\"" >&2; return 2; }
+    post_notification "com.macsist.assistant.propose" "$text"
+}
+
+cmd_approve() {  # M14: approve a pending proposal by id
+    local pid="${1:-}"
+    [[ -n "$pid" ]] || { echo "사용법: macsist approve <proposal-id>" >&2; return 2; }
+    post_notification "com.macsist.assistant.approve" "$pid"
+}
+
+cmd_scan() {  # M14: run one proactive cycle now
+    post_notification "com.macsist.assistant.scan"
 }
 
 cmd_doctor() {
@@ -334,6 +361,10 @@ case "${1:-__default__}" in
     settings) post_notification "com.macsist.showSettings" ;;
     history)  post_notification "com.macsist.showHistory" ;;
     tasks)   cmd_tasks ;;
+    inbox)   cmd_inbox ;;
+    propose) shift; cmd_propose "$@" ;;
+    approve) shift; cmd_approve "${1:-}" ;;
+    scan)    cmd_scan ;;
     doctor)  cmd_doctor ;;
     update)  cmd_update ;;
     help|-h|--help) usage ;;

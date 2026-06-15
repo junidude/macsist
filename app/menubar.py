@@ -78,6 +78,11 @@ class StatusItemController(NSObject):
             t("menubar.assistant"), None, ""
         )
         assistant_menu = NSMenu.alloc().init()
+        self.assistant_inbox_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            t("menubar.assistant_inbox"), "openAssistant:", ""
+        )
+        self.assistant_inbox_item.setTarget_(self)
+        assistant_menu.addItem_(self.assistant_inbox_item)
         self.assistant_tasks_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             t("menubar.assistant_tasks"), "openAssistant:", ""
         )
@@ -134,6 +139,7 @@ class StatusItemController(NSObject):
         """Re-resolve every menu title after a language change (M11)."""
         self.history_item.setTitle_(t("menubar.history"))
         self.settings_item.setTitle_(t("menubar.settings"))
+        self.assistant_inbox_item.setTitle_(t("menubar.assistant_inbox"))
         self.assistant_tasks_item.setTitle_(t("menubar.assistant_tasks"))
         self.updateAssistantBadge_(self._assistant_badge)
         self.quit_item.setTitle_(t("menubar.quit"))

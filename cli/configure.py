@@ -219,6 +219,22 @@ def cmd_tasks(args):
     return 0
 
 
+def cmd_inbox(args):
+    """M14: print the assistant inbox (pending + approved-not-run proposals)."""
+    from assistant.proposal_store import ProposalStore
+    store = ProposalStore(ConfigStore())
+    items = store.inbox()
+    if getattr(args, "json", False):
+        return _emit(items)
+    if not items:
+        print("받은 작업함이 비어 있습니다")
+        return 0
+    for p in items:
+        print(f"· [{p.get('status')}/{p.get('risk')}] {p.get('id')}  "
+              f"{p.get('title')}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -247,6 +263,9 @@ def main():
     p = sub.add_parser("tasks")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("inbox")
+    p.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     handler = {
         "status": cmd_status,
@@ -255,6 +274,7 @@ def main():
         "set-language": cmd_set_language,
         "probe": cmd_probe,
         "tasks": cmd_tasks,
+        "inbox": cmd_inbox,
     }[args.cmd]
     sys.exit(handler(args))
 

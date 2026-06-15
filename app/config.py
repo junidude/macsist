@@ -138,6 +138,25 @@ DEFAULTS = {
     "assistant_tick_interval": 300.0,
     # "" = all tenants; "remote" etc. to scope the cockpit (M16 remote jobs)
     "assistant_kanban_tenant": "",
+    # ── Proactive engine (M14) — the real opt-in (propose-then-confirm) ───
+    "assistant_proactive_enabled": False,   # OFF until the user trusts it
+    "assistant_proactive_interval": 1800.0,
+    # propose_only = never auto-execute (default, decision #8);
+    # auto_safe = auto-run auto-class kinds in assistant_auto_safe_kinds
+    "assistant_autonomy": "propose_only",
+    "assistant_auto_safe_kinds": [],        # decision #8: everything via panel
+    "assistant_quiet_hours": [22, 8],       # [start_h, end_h] — no nudges
+    "assistant_model": "",                  # "" => active explain provider
+    # work threads
+    "assistant_thread_poll_interval": 60.0,
+    "assistant_thread_stale_hours": 6,
+    "assistant_nudge_max_per_cycle": 1,     # at most N resume nudges per cycle
+    "assistant_nudge_cooldown_hours": 12,
+    "assistant_thread_log_max": 5000,
+    "assistant_proposal_max": 200,
+    # assistant hotkeys (single HotkeyManager — rebind only, never new listener)
+    "hotkey_open_inbox": "<cmd>+<shift>+i",
+    "hotkey_capture_task": "<cmd>+<shift>+t",
 }
 
 
@@ -185,7 +204,10 @@ _SUPERSEDED_DEFAULTS = {
 # everything) and scrubbed again at save() so a settings save that writes the
 # fields back verbatim can't re-pin them.
 _LANG_KEYS = ("system_prompt_text", "system_prompt_image",
-              "user_prompt_image", "detail_levels")
+              "user_prompt_image", "detail_levels",
+              # M14 assistant prompts (resolved per language at get() time)
+              "assistant_propose_system", "assistant_digest_user",
+              "assistant_resume_system", "assistant_resume_user")
 
 
 def _migrate_providers(on_disk):

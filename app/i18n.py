@@ -120,6 +120,23 @@ STRINGS = {
         "menubar.assistant": "비서",
         "menubar.assistant_tasks": "작업 보기…",
         "assistant.empty": "표시할 작업이 없습니다",
+        "assistant.approve": "승인",
+        "assistant.skip": "건너뛰기",
+        "assistant.snooze": "나중에",
+        "menubar.assistant_inbox": "받은 작업함",
+        "assistant.threads_title": "작업 스레드",
+        "assistant.tasks_title": "칸반 작업",
+        "assistant.resume": "이어서",
+        "assistant.no_threads": "작업 스레드가 없습니다",
+        "settings.section_assistant": "비서",
+        "settings.assistant_proactive_title": "능동 제안",
+        "settings.assistant_proactive_desc": "멈춘 작업을 스스로 찾아 먼저 제안합니다",
+        "settings.assistant_autonomy_title": "신뢰 다이얼",
+        "settings.assistant_autonomy_desc": "제안만 받을지, 안전한 작업은 자동 실행할지",
+        "settings.autonomy_propose": "제안만 (확인 후 실행)",
+        "settings.autonomy_auto": "안전한 건 자동 실행",
+        "settings.assistant_interval_title": "제안 주기 (초)",
+        "settings.assistant_interval_desc": "능동 제안을 점검하는 간격",
         "history.search_placeholder": "검색 (질문/응답)",
         "history.save_master": "기록 저장",
         "history.save_images": "이미지 저장",
@@ -293,6 +310,23 @@ STRINGS = {
         "menubar.assistant": "Assistant",
         "menubar.assistant_tasks": "View Tasks…",
         "assistant.empty": "No tasks to show",
+        "assistant.approve": "Approve",
+        "assistant.skip": "Skip",
+        "assistant.snooze": "Snooze",
+        "menubar.assistant_inbox": "Inbox",
+        "assistant.threads_title": "Work threads",
+        "assistant.tasks_title": "Kanban tasks",
+        "assistant.resume": "Resume",
+        "assistant.no_threads": "No work threads",
+        "settings.section_assistant": "Assistant",
+        "settings.assistant_proactive_title": "Proactive suggestions",
+        "settings.assistant_proactive_desc": "Find stalled work and suggest it first",
+        "settings.assistant_autonomy_title": "Trust dial",
+        "settings.assistant_autonomy_desc": "Suggest only, or auto-run safe actions",
+        "settings.autonomy_propose": "Suggest only (run after confirm)",
+        "settings.autonomy_auto": "Auto-run safe actions",
+        "settings.assistant_interval_title": "Suggestion interval (s)",
+        "settings.assistant_interval_desc": "How often to check for suggestions",
         "history.search_placeholder": "Search (question/answer)",
         "history.save_master": "Save history",
         "history.save_images": "Save images",
@@ -442,6 +476,23 @@ STRINGS = {
         "menubar.assistant": "助手",
         "menubar.assistant_tasks": "查看任务…",
         "assistant.empty": "暂无任务",
+        "assistant.approve": "批准",
+        "assistant.skip": "跳过",
+        "assistant.snooze": "稍后",
+        "menubar.assistant_inbox": "收件箱",
+        "assistant.threads_title": "工作线程",
+        "assistant.tasks_title": "看板任务",
+        "assistant.resume": "继续",
+        "assistant.no_threads": "暂无工作线程",
+        "settings.section_assistant": "助手",
+        "settings.assistant_proactive_title": "主动建议",
+        "settings.assistant_proactive_desc": "自动发现停滞的工作并先行建议",
+        "settings.assistant_autonomy_title": "信任档位",
+        "settings.assistant_autonomy_desc": "仅建议，或自动执行安全操作",
+        "settings.autonomy_propose": "仅建议（确认后执行）",
+        "settings.autonomy_auto": "自动执行安全操作",
+        "settings.assistant_interval_title": "建议间隔（秒）",
+        "settings.assistant_interval_desc": "检查建议的频率",
         "history.search_placeholder": "搜索（问题/回答）",
         "history.save_master": "保存记录",
         "history.save_images": "保存图像",
@@ -592,6 +643,23 @@ STRINGS = {
         "menubar.assistant": "アシスタント",
         "menubar.assistant_tasks": "タスクを表示…",
         "assistant.empty": "表示するタスクがありません",
+        "assistant.approve": "承認",
+        "assistant.skip": "スキップ",
+        "assistant.snooze": "あとで",
+        "menubar.assistant_inbox": "受信箱",
+        "assistant.threads_title": "作業スレッド",
+        "assistant.tasks_title": "カンバン タスク",
+        "assistant.resume": "再開",
+        "assistant.no_threads": "作業スレッドがありません",
+        "settings.section_assistant": "アシスタント",
+        "settings.assistant_proactive_title": "能動的な提案",
+        "settings.assistant_proactive_desc": "停滞した作業を見つけて先に提案します",
+        "settings.assistant_autonomy_title": "信頼ダイヤル",
+        "settings.assistant_autonomy_desc": "提案のみか、安全な操作は自動実行か",
+        "settings.autonomy_propose": "提案のみ（確認後に実行）",
+        "settings.autonomy_auto": "安全な操作は自動実行",
+        "settings.assistant_interval_title": "提案の間隔（秒）",
+        "settings.assistant_interval_desc": "提案を確認する頻度",
         "history.search_placeholder": "検索（質問/回答）",
         "history.save_master": "履歴を保存",
         "history.save_images": "画像を保存",
@@ -742,6 +810,23 @@ STRINGS = {
         "menubar.assistant": "Assistant",
         "menubar.assistant_tasks": "Voir les tâches…",
         "assistant.empty": "Aucune tâche à afficher",
+        "assistant.approve": "Approuver",
+        "assistant.skip": "Ignorer",
+        "assistant.snooze": "Plus tard",
+        "menubar.assistant_inbox": "Boîte de réception",
+        "assistant.threads_title": "Fils de travail",
+        "assistant.tasks_title": "Tâches Kanban",
+        "assistant.resume": "Reprendre",
+        "assistant.no_threads": "Aucun fil de travail",
+        "settings.section_assistant": "Assistant",
+        "settings.assistant_proactive_title": "Suggestions proactives",
+        "settings.assistant_proactive_desc": "Trouve le travail en pause et le propose",
+        "settings.assistant_autonomy_title": "Niveau de confiance",
+        "settings.assistant_autonomy_desc": "Suggérer seulement, ou exécuter le sûr",
+        "settings.autonomy_propose": "Suggérer (exécuter après confirmation)",
+        "settings.autonomy_auto": "Exécuter automatiquement le sûr",
+        "settings.assistant_interval_title": "Intervalle de suggestion (s)",
+        "settings.assistant_interval_desc": "Fréquence de vérification des suggestions",
         "history.search_placeholder": "Rechercher (question/réponse)",
         "history.save_master": "Enregistrer l'historique",
         "history.save_images": "Enregistrer les images",
@@ -892,6 +977,23 @@ STRINGS = {
         "menubar.assistant": "Assistent",
         "menubar.assistant_tasks": "Aufgaben anzeigen…",
         "assistant.empty": "Keine Aufgaben",
+        "assistant.approve": "Genehmigen",
+        "assistant.skip": "Überspringen",
+        "assistant.snooze": "Später",
+        "menubar.assistant_inbox": "Eingang",
+        "assistant.threads_title": "Arbeitsstränge",
+        "assistant.tasks_title": "Kanban-Aufgaben",
+        "assistant.resume": "Fortsetzen",
+        "assistant.no_threads": "Keine Arbeitsstränge",
+        "settings.section_assistant": "Assistent",
+        "settings.assistant_proactive_title": "Proaktive Vorschläge",
+        "settings.assistant_proactive_desc": "Findet pausierte Arbeit und schlägt sie vor",
+        "settings.assistant_autonomy_title": "Vertrauensstufe",
+        "settings.assistant_autonomy_desc": "Nur vorschlagen oder Sicheres automatisch",
+        "settings.autonomy_propose": "Nur vorschlagen (nach Bestätigung)",
+        "settings.autonomy_auto": "Sichere Aktionen automatisch",
+        "settings.assistant_interval_title": "Vorschlagsintervall (s)",
+        "settings.assistant_interval_desc": "Wie oft nach Vorschlägen gesucht wird",
         "history.search_placeholder": "Suchen (Frage/Antwort)",
         "history.save_master": "Verlauf speichern",
         "history.save_images": "Bilder speichern",
@@ -1021,6 +1123,22 @@ PROMPT_DEFAULTS = {
             "번역은 처음 한 번으로 충분하다."
         ),
         "user_prompt_image": "이 이미지를 한국어로 간결하게 설명해줘.",
+        "assistant_propose_system": (
+            "너는 능동적 업무 비서다. 아래 신호를 보고 사용자가 지금 하면 좋을 "
+            "일을 제안해라. JSON 배열만 출력하고 다른 설명은 절대 쓰지 마라. 각 "
+            "항목은 {\"kind\": \"todo_add\", \"title\": \"...\", "
+            "\"rationale\": \"...\"} 형식이며 kind는 todo_add만 사용한다. 제안이 "
+            "없으면 []을 출력해라. 모든 문장은 한국어로."
+        ),
+        "assistant_digest_user": "다음 신호를 보고 제안해라:\n<<DIGEST>>",
+        "assistant_resume_system": (
+            "너는 사용자가 멈춘 업무 스레드를 다시 이어받도록 돕는 비서다. 아래 "
+            "스레드 정보를 보고 '어디까지 했는지(where_was_i)'와 '다음에 할 "
+            "일(next_action)'을 각각 한국어 1~2문장으로 요약해라. 반드시 JSON "
+            "객체 하나만 출력해라: {\"where_was_i\": \"...\", "
+            "\"next_action\": \"...\"}"
+        ),
+        "assistant_resume_user": "스레드 정보:\n<<CONTEXT>>",
         "detail_levels": {
             "brief": {
                 "label": "간단",
@@ -1062,6 +1180,22 @@ PROMPT_DEFAULTS = {
             "enough."
         ),
         "user_prompt_image": "Explain this image concisely in English.",
+        "assistant_propose_system": (
+            "You are a proactive work assistant. Given the signals below, "
+            "propose what the user should do now. Output ONLY a JSON array, no "
+            "other text. Each item is {\"kind\": \"todo_add\", "
+            "\"title\": \"...\", \"rationale\": \"...\"}; use only the kind "
+            "todo_add. Output [] if there is nothing to propose. Write in "
+            "English."
+        ),
+        "assistant_digest_user": "Propose based on these signals:\n<<DIGEST>>",
+        "assistant_resume_system": (
+            "You help the user resume a stalled work thread. From the thread "
+            "info below, summarize 'where_was_i' and 'next_action' in 1–2 "
+            "English sentences each. Output exactly one JSON object: "
+            "{\"where_was_i\": \"...\", \"next_action\": \"...\"}"
+        ),
+        "assistant_resume_user": "Thread info:\n<<CONTEXT>>",
         "detail_levels": {
             "brief": {
                 "label": "Brief",
@@ -1093,6 +1227,19 @@ PROMPT_DEFAULTS = {
             "即可。翻译只需在开头做一次。"
         ),
         "user_prompt_image": "请用简体中文简洁地解释这张图片。",
+        "assistant_propose_system": (
+            "你是主动型工作助手。根据下面的信号，提出用户现在适合做的事。只输出 "
+            "JSON 数组，不要任何其他文字。每一项为 {\"kind\": \"todo_add\", "
+            "\"title\": \"...\", \"rationale\": \"...\"}，kind 只能用 todo_add。"
+            "没有建议时输出 []。用简体中文书写。"
+        ),
+        "assistant_digest_user": "请根据以下信号提出建议：\n<<DIGEST>>",
+        "assistant_resume_system": (
+            "你帮助用户重新接续已停滞的工作线程。根据下面的线程信息，用 1～2 句"
+            "简体中文分别概括 'where_was_i' 与 'next_action'。只输出一个 JSON "
+            "对象：{\"where_was_i\": \"...\", \"next_action\": \"...\"}"
+        ),
+        "assistant_resume_user": "线程信息：\n<<CONTEXT>>",
         "detail_levels": {
             "brief": {
                 "label": "简短",
@@ -1123,6 +1270,21 @@ PROMPT_DEFAULTS = {
             "ください。翻訳は最初の一度で十分です。"
         ),
         "user_prompt_image": "この画像を日本語で簡潔に説明してください。",
+        "assistant_propose_system": (
+            "あなたは能動的な業務アシスタントだ。以下のシグナルを見て、ユーザーが"
+            "今やるとよいことを提案せよ。JSON配列のみを出力し、他の文章は書くな。"
+            "各項目は {\"kind\": \"todo_add\", \"title\": \"...\", "
+            "\"rationale\": \"...\"} 形式で、kind は todo_add のみ。提案が無ければ "
+            "[] を出力。日本語で記述。"
+        ),
+        "assistant_digest_user": "次のシグナルから提案せよ:\n<<DIGEST>>",
+        "assistant_resume_system": (
+            "あなたは中断した業務スレッドの再開を助けるアシスタントだ。以下の"
+            "スレッド情報から 'where_was_i' と 'next_action' をそれぞれ日本語 "
+            "1〜2文で要約せよ。JSONオブジェクトを1つだけ出力: "
+            "{\"where_was_i\": \"...\", \"next_action\": \"...\"}"
+        ),
+        "assistant_resume_user": "スレッド情報:\n<<CONTEXT>>",
         "detail_levels": {
             "brief": {
                 "label": "簡単",
@@ -1160,6 +1322,22 @@ PROMPT_DEFAULTS = {
             "début suffit."
         ),
         "user_prompt_image": "Explique cette image de façon concise en français.",
+        "assistant_propose_system": (
+            "Tu es un assistant de travail proactif. À partir des signaux "
+            "ci-dessous, propose ce que l'utilisateur devrait faire maintenant. "
+            "Renvoie UNIQUEMENT un tableau JSON, sans autre texte. Chaque "
+            "élément est {\"kind\": \"todo_add\", \"title\": \"...\", "
+            "\"rationale\": \"...\"} ; n'utilise que le kind todo_add. Renvoie "
+            "[] s'il n'y a rien à proposer. Écris en français."
+        ),
+        "assistant_digest_user": "Propose à partir de ces signaux :\n<<DIGEST>>",
+        "assistant_resume_system": (
+            "Tu aides l'utilisateur à reprendre un fil de travail interrompu. "
+            "À partir des infos ci-dessous, résume 'where_was_i' et "
+            "'next_action' en 1–2 phrases françaises chacun. Renvoie un seul "
+            "objet JSON : {\"where_was_i\": \"...\", \"next_action\": \"...\"}"
+        ),
+        "assistant_resume_user": "Infos du fil :\n<<CONTEXT>>",
         "detail_levels": {
             "brief": {
                 "label": "Bref",
@@ -1196,6 +1374,22 @@ PROMPT_DEFAULTS = {
             "ein Assistent. Eine einmalige Übersetzung zu Beginn genügt."
         ),
         "user_prompt_image": "Erkläre dieses Bild prägnant auf Deutsch.",
+        "assistant_propose_system": (
+            "Du bist ein proaktiver Arbeitsassistent. Schlage anhand der "
+            "Signale unten vor, was der Nutzer jetzt tun sollte. Gib NUR ein "
+            "JSON-Array aus, keinen weiteren Text. Jedes Element ist "
+            "{\"kind\": \"todo_add\", \"title\": \"...\", "
+            "\"rationale\": \"...\"}; verwende nur den kind todo_add. Gib [] "
+            "aus, wenn es nichts vorzuschlagen gibt. Schreibe auf Deutsch."
+        ),
+        "assistant_digest_user": "Schlage anhand dieser Signale vor:\n<<DIGEST>>",
+        "assistant_resume_system": (
+            "Du hilfst dem Nutzer, einen unterbrochenen Arbeitsstrang wieder "
+            "aufzunehmen. Fasse aus den Infos unten 'where_was_i' und "
+            "'next_action' in je 1–2 deutschen Sätzen zusammen. Gib genau ein "
+            "JSON-Objekt aus: {\"where_was_i\": \"...\", \"next_action\": \"...\"}"
+        ),
+        "assistant_resume_user": "Strang-Infos:\n<<CONTEXT>>",
         "detail_levels": {
             "brief": {
                 "label": "Kurz",

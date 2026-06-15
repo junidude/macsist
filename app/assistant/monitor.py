@@ -57,3 +57,40 @@ class AssistantMonitor:
     def _emit(self):
         if self.on_change is not None:
             AppHelper.callAfter(self.on_change)
+
+
+class ProactiveMonitor:
+    """Wakes every assistant_proactive_interval and runs one engine.scan() on a
+    worker thread (off-main LLM). scan() itself no-ops when proactivity is off,
+    so this thread is cheap when disabled. poke() runs a cycle now (`macsist
+    scan`). Stores are lock-guarded; the engine marshals UI callbacks to main.
+    """
+
+    def __init__(self, config, engine):
+        self.config = config
+        self.engine = engine
+        self._wake = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if not bool(self.config.get("assistant_enabled")):
+            return
+        self._thread = threading.Thread(
+            target=self._loop, name="assistant-proactive", daemon=True
+        )
+        self._thread.start()
+        print("proactive monitor started", flush=True)
+
+    def poke(self):
+        self._wake.set()
+
+    def _loop(self):
+        while True:
+            self._wake.wait(
+                timeout=float(self.config.get("assistant_proactive_interval"))
+            )
+            self._wake.clear()
+            try:
+                self.engine.scan()
+            except Exception as exc:  # never let the daemon thread die
+                print(f"proactive monitor: scan error {exc!r}", flush=True)

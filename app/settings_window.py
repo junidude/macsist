@@ -175,6 +175,10 @@ class SettingsPaneController(NSObject):
         self.max_tokens_field = None
         self.followup_field = None
         self.template_kwargs_field = None
+        # 비서 (M14): proactive toggle + trust dial + interval
+        self.assistant_proactive_switch = None
+        self.assistant_autonomy_popup = None
+        self.assistant_interval_field = None
         self.on_saved = None  # set by main.py: hotkey reload + panel rebuild
         self.on_record_changed = None  # set by main.py: pause hotkeys while recording
         self._hotkey_bindings = {}  # config key -> pynput format, saved on Save
@@ -234,6 +238,15 @@ class SettingsPaneController(NSObject):
         )
         self.template_kwargs_field.setStringValue_(
             json.dumps(self.config.get("chat_template_kwargs"), ensure_ascii=False)
+        )
+        self.assistant_proactive_switch.setState_(
+            1 if self.config.get("assistant_proactive_enabled") else 0
+        )
+        self.assistant_autonomy_popup.selectItemAtIndex_(
+            1 if str(self.config.get("assistant_autonomy")) == "auto_safe" else 0
+        )
+        self.assistant_interval_field.setStringValue_(
+            f"{float(self.config.get('assistant_proactive_interval')):g}"
         )
         self.status_label.setStringValue_("")
         print("settings pane refreshed", flush=True)
@@ -562,6 +575,33 @@ class SettingsPaneController(NSObject):
             inner.addSubview_(control)
             self.detail_control = control
         card([(ROW_H, build_detail)])
+
+        # ---- 비서 (M14) ----
+        section(t("settings.section_assistant"))
+
+        def build_proactive(inner, row_y):
+            titled(inner, row_y, t("settings.assistant_proactive_title"),
+                   t("settings.assistant_proactive_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(
+                control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.assistant_proactive_switch = switch
+
+        def build_autonomy(inner, row_y):
+            titled(inner, row_y, t("settings.assistant_autonomy_title"),
+                   t("settings.assistant_autonomy_desc"))
+            popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                control_frame(row_y, 240), False)
+            popup.addItemWithTitle_(t("settings.autonomy_propose"))
+            popup.addItemWithTitle_(t("settings.autonomy_auto"))
+            inner.addSubview_(popup)
+            self.assistant_autonomy_popup = popup
+
+        interval_holder, interval_row = field_row(
+            t("settings.assistant_interval_title"),
+            t("settings.assistant_interval_desc"), w=120)
+        card([(ROW_H, build_proactive), (ROW_H, build_autonomy), interval_row])
+        self.assistant_interval_field = interval_holder["field"]
 
         # ---- 단축키 ----
         section(t("settings.section_hotkeys"))
@@ -963,6 +1003,18 @@ class SettingsPaneController(NSObject):
             self.config.set(key, value)
         for key, value in advanced.items():
             self.config.set(key, value)
+        # 비서 (M14)
+        self.config.set("assistant_proactive_enabled",
+                        bool(self.assistant_proactive_switch.state()))
+        self.config.set(
+            "assistant_autonomy",
+            "auto_safe" if self.assistant_autonomy_popup.indexOfSelectedItem() == 1
+            else "propose_only")
+        try:
+            self.config.set("assistant_proactive_interval",
+                            float(self.assistant_interval_field.stringValue()))
+        except (ValueError, TypeError):
+            pass  # keep the current interval on a bad value
         self.config.save()
         if self.on_saved is not None:
             self.on_saved()  # re-register hotkeys + rebuild the result panel

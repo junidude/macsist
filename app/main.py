@@ -56,11 +56,12 @@ class _RemoteCommandRelay(NSObject):
     main-thread — safe to drive AppKit directly. The `remote:` lines are the
     greppable verification hook (app.log)."""
 
-    def initWithMainWindow_(self, main_window):
+    def initWithMainWindow_assistant_(self, main_window, assistant):
         self = objc.super(_RemoteCommandRelay, self).init()
         if self is None:
             return None
         self._main_window = main_window
+        self._assistant = assistant
         return self
 
     def remoteShowSettings_(self, note):
@@ -74,6 +75,31 @@ class _RemoteCommandRelay(NSObject):
     def remoteAssistantShowTasks_(self, note):
         print("remote: assistant.showTasks", flush=True)
         self._main_window.showAssistant()
+
+    @staticmethod
+    def _payload(note):
+        info = note.userInfo()
+        return info.get("payload") if info else None
+
+    def remoteAssistantPropose_(self, note):
+        print("remote: assistant.propose", flush=True)
+        if self._assistant is not None:
+            self._assistant.handlePropose_(self._payload(note))
+
+    def remoteAssistantApprove_(self, note):
+        print("remote: assistant.approve", flush=True)
+        if self._assistant is not None:
+            self._assistant.handleApprove_(self._payload(note))
+
+    def remoteAssistantScan_(self, note):
+        print("remote: assistant.scan", flush=True)
+        if self._assistant is not None:
+            self._assistant.handleScan()
+
+    def remoteAssistantInbox_(self, note):
+        print("remote: assistant.inbox", flush=True)
+        if self._assistant is not None:
+            self._assistant.showInbox()
 
 
 class _UIAuditor(NSObject):
@@ -258,13 +284,17 @@ def main():
     _controller = StatusItemController.alloc().initWithConfig_history_(
         config, history
     )
+    main_window = _controller.main_window
     panel = ResultPanelController.alloc().initWithConfig_(config)
     _health = ServerHealthMonitor(config, on_change=_controller.setServerState_)
+    # M13/M14: assistant subsystem. Built before ExplainController so its
+    # hotkeys (capture-task / open-inbox) join the single HotkeyManager.
+    _assistant = AssistantController(config, _controller, main_window)
     _explain = ExplainController(config, panel, health_monitor=_health,
-                                 history=history)
+                                 history=history, assistant=_assistant)
     _health.start()
     _explain.start()
-    main_window = _controller.main_window
+    _assistant.start()
 
     def _settings_saved():
         _explain.reloadHotkeys()
@@ -283,13 +313,9 @@ def main():
     main_window.on_reask = _explain.resubmit_text
     main_window.on_reask_image = _explain.resubmit_image
     _explain.on_open_history = main_window.toggleHistory
-    # M13: assistant subsystem — read-only kanban cockpit + menu-bar badge.
-    # Constructed after the menu bar/window exist; wires the board monitor to
-    # the badge + 작업 tab. The proactive engine arrives in M14.
-    _assistant = AssistantController(config, _controller, main_window)
-    _assistant.start()
     # M10: `macsist settings|history` IPC (distributed notifications).
-    _remote_relay = _RemoteCommandRelay.alloc().initWithMainWindow_(main_window)
+    _remote_relay = _RemoteCommandRelay.alloc().initWithMainWindow_assistant_(
+        main_window, _assistant)
     dist_center = NSDistributedNotificationCenter.defaultCenter()
     dist_center.addObserver_selector_name_object_(
         _remote_relay, "remoteShowSettings:", "com.macsist.showSettings", None
@@ -301,6 +327,15 @@ def main():
         _remote_relay, "remoteAssistantShowTasks:",
         "com.macsist.assistant.showTasks", None
     )
+    for _name, _sel in (
+        ("propose", "remoteAssistantPropose:"),
+        ("approve", "remoteAssistantApprove:"),
+        ("scan", "remoteAssistantScan:"),
+        ("inbox", "remoteAssistantInbox:"),
+    ):
+        dist_center.addObserver_selector_name_object_(
+            _remote_relay, _sel, f"com.macsist.assistant.{_name}", None
+        )
     # M11 hook: switch the language like a Settings save would, at given
     # times — live-switch verification. Format: "<sec>:<code>[,<sec>:<code>…]"
     switches = os.environ.get("HE_DEBUG_SET_LANGUAGE")
