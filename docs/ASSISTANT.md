@@ -206,7 +206,9 @@ app/assistant/
 
 ```python
 # 마스터/공통
-"assistant_enabled": False,                 # 기본 OFF — 옵트인
+"assistant_enabled": True,                  # 읽기전용 cockpit 마스터(M13 구현):
+                                            # 로컬 보드만 미러 → 기본 ON. 진짜
+                                            # 옵트인은 assistant_proactive_enabled.
 "assistant_tick_interval": 300.0,
 "assistant_proactive_enabled": False,       # 신뢰 쌓기 전 OFF
 "assistant_proactive_interval": 1800.0,

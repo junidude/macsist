@@ -178,6 +178,7 @@ class _SidebarController(NSObject):
 
     _ITEMS = (  # (key, i18n label key, SF Symbol)
         ("history", "history.nav_history", "clock.arrow.circlepath"),
+        ("assistant", "history.nav_assistant", "sparkles"),
         ("settings", "history.nav_settings", "gearshape"),
     )
 
@@ -273,6 +274,9 @@ class MainWindowController(NSObject):
         self.sidebar = _SidebarController.alloc().initWithOwner_(self)
         self.sidebar_effect = None
         self.search_field = None  # the unified toolbar's search field (M8)
+        self.assistant_bridge = None  # HermesBridge, set by AssistantController
+        self.assistant_scroll = None
+        self.assistant_doc = None
         self.table = None  # session list (right column)
         self.chat_scroll = None
         self.chat_doc = None
@@ -294,6 +298,9 @@ class MainWindowController(NSObject):
 
     def showSettings(self):
         self._show_("settings")
+
+    def showAssistant(self):
+        self._show_("assistant")
 
     def runOnboardingIfNeeded(self):
         """First run of a downloaded .app (M13): the user hasn't picked a
@@ -365,6 +372,8 @@ class MainWindowController(NSObject):
     def _refreshTab_(self, tab_id):
         if tab_id == "history":
             self.refreshHistory()
+        elif tab_id == "assistant":
+            self.refreshAssistant()
         else:
             self.settings.refresh()
 
@@ -536,8 +545,8 @@ class MainWindowController(NSObject):
             flush=True,
         )
 
-        # source list (기록/설정) at the island top, below the traffic lights
-        list_h = 2 * 36.0 + 8
+        # source list (기록/비서/설정) at the island top, below the traffic lights
+        list_h = len(self.sidebar._ITEMS) * 36.0 + 8
         side_scroll = NSScrollView.alloc().initWithFrame_(
             NSMakeRect(0, island_h - 44 - list_h, SIDEBAR_WIDTH, list_h)
         )
@@ -597,6 +606,13 @@ class MainWindowController(NSObject):
         item = NSTabViewItem.alloc().initWithIdentifier_("history")
         item.setLabel_("History")
         item.setView_(history_view)
+        self.tab_view.addTabViewItem_(item)
+
+        assistant_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, cw, ch))
+        self._buildAssistantTab_(assistant_view)
+        item = NSTabViewItem.alloc().initWithIdentifier_("assistant")
+        item.setLabel_("Assistant")
+        item.setView_(assistant_view)
         self.tab_view.addTabViewItem_(item)
 
         settings_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, cw, ch))
@@ -700,6 +716,128 @@ class MainWindowController(NSObject):
         self.table.setAllowsMultipleSelection_(False)
         sess_scroll.setDocumentView_(self.table)
         container.addSubview_(sess_scroll)
+
+    # -- assistant (M13: read-only kanban cockpit) -------------------------------
+
+    def _buildAssistantTab_(self, container):
+        size = container.frame().size
+        cw, ch = size.width, size.height
+        self.assistant_scroll = NSScrollView.alloc().initWithFrame_(
+            NSMakeRect(PADDING, PADDING, cw - 2 * PADDING, ch - 2 * PADDING)
+        )
+        self.assistant_scroll.setHasVerticalScroller_(True)
+        self.assistant_scroll.setDrawsBackground_(False)
+        self.assistant_doc = _FlippedView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, cw - 2 * PADDING, 10)
+        )
+        self.assistant_scroll.setDocumentView_(self.assistant_doc)
+        container.addSubview_(self.assistant_scroll)
+
+    def refreshAssistant(self):
+        """Read the kanban board (read-only) and re-render the cards. Safe when
+        the bridge is unset / Hermes absent — renders the empty state."""
+        tasks = []
+        if self.assistant_bridge is not None:
+            try:
+                tasks = self.assistant_bridge.board_tasks()
+            except Exception as exc:  # a board read must never break the window
+                print(f"assistant tab: board read error {exc!r}", flush=True)
+        self._renderKanban_(tasks)
+
+    def refreshAssistantIfVisible(self):
+        """Called from AssistantController on a board change — only redraw when
+        the user is actually looking at the 작업 tab."""
+        if (self.window is not None and self.window.isVisible()
+                and self.tab_view is not None
+                and str(self.tab_view.selectedTabViewItem().identifier())
+                == "assistant"):
+            self.refreshAssistant()
+
+    def _renderKanban_(self, tasks):
+        doc = self.assistant_doc
+        if doc is None:
+            return
+        for sub in list(doc.subviews()):
+            sub.removeFromSuperview()
+        width = self.assistant_scroll.contentSize().width
+        if not tasks:
+            label = NSTextField.labelWithString_(t("assistant.empty"))
+            label.setFont_(NSFont.systemFontOfSize_(13.0))
+            label.setTextColor_(NSColor.secondaryLabelColor())
+            label.setFrame_(NSMakeRect(8, 12, width - 16, 20))
+            doc.setFrameSize_(NSMakeSize(width, 44))
+            doc.addSubview_(label)
+            return
+        card_h, gap = 76.0, 8.0
+        doc.setFrameSize_(NSMakeSize(width, len(tasks) * (card_h + gap) + 4))
+        y = 4.0
+        for task in tasks:
+            self._addKanbanCardTo_y_width_task_(doc, y, width, task)
+            y += card_h + gap
+
+    def _addKanbanCardTo_y_width_task_(self, doc, y, width, task):
+        from datetime import datetime
+
+        from AppKit import NSLineBreakByTruncatingTail, NSTextAlignmentRight
+
+        card_w, card_h, pad = width - 8, 76.0, 12.0
+        box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
+        box.setBoxType_(NSBoxCustom)
+        box.setTitlePosition_(0)
+        box.setBorderWidth_(0.0)
+        box.setCornerRadius_(10.0)
+        box.setContentViewMargins_(NSMakeSize(0, 0))
+        box.setFillColor_(
+            NSColor.textBackgroundColor().colorWithAlphaComponent_(0.5)
+        )
+        inner = box.contentView()
+
+        title = NSTextField.labelWithString_(str(task.get("title") or "—"))
+        title.setFont_(NSFont.boldSystemFontOfSize_(14.0))
+        title.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        title.setFrame_(NSMakeRect(pad, card_h - 28, card_w - 2 * pad - 104, 19))
+        inner.addSubview_(title)
+
+        status = str(task.get("status") or "")
+        if status:
+            st = NSTextField.labelWithString_(status)
+            st.setFont_(NSFont.systemFontOfSize_(11.0))
+            st.setAlignment_(NSTextAlignmentRight)
+            st.setTextColor_(NSColor.secondaryLabelColor())
+            st.setFrame_(NSMakeRect(card_w - pad - 100, card_h - 27, 100, 16))
+            inner.addSubview_(st)
+
+        body = str(task.get("body") or "").replace("\n", " ").strip()
+        if body:
+            sn = NSTextField.labelWithString_(body)
+            sn.setFont_(NSFont.systemFontOfSize_(12.0))
+            sn.setTextColor_(NSColor.secondaryLabelColor())
+            sn.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            sn.setFrame_(NSMakeRect(pad, card_h - 50, card_w - 2 * pad, 17))
+            inner.addSubview_(sn)
+
+        bits = []
+        for field in ("assignee", "tenant"):
+            if task.get(field):
+                bits.append(str(task[field]))
+        ts = task.get("created_at")
+        if ts:
+            try:
+                v = float(ts)
+                if v > 1e12:  # tolerate epoch-ms
+                    v /= 1000.0
+                bits.append(datetime.fromtimestamp(v).strftime("%m-%d %H:%M"))
+            except (ValueError, OSError, OverflowError):
+                pass
+        if bits:
+            ft = NSTextField.labelWithString_(" · ".join(bits))
+            ft.setFont_(NSFont.systemFontOfSize_(11.0))
+            ft.setTextColor_(NSColor.tertiaryLabelColor())
+            ft.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            ft.setFrame_(NSMakeRect(pad, 8, card_w - 2 * pad, 15))
+            inner.addSubview_(ft)
+
+        doc.addSubview_(box)
 
     # -- history sessions ---------------------------------------------------------
 

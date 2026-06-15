@@ -126,6 +126,18 @@ DEFAULTS = {
     "history_max_items": 500,
     "history_snippet_chars": 4000,
     "history_window_floating": False,
+    # ── Assistant subsystem (M13+) — docs/ASSISTANT.md ────────────────────
+    # Master switch for the read-only cockpit + live board polling. The
+    # *proactive* engine (M14) is a SEPARATE opt-in (assistant_proactive_*),
+    # so this can default on: it only mirrors an existing local kanban board.
+    "assistant_enabled": True,
+    # The ONLY Hermes contact points (read-only DB + CLI). Keys never here.
+    "assistant_kanban_db_path": "~/.hermes/kanban.db",
+    "hermes_bin": "~/.local/bin/hermes",
+    # board poll cadence (seconds); change detection diffs task_events.id
+    "assistant_tick_interval": 300.0,
+    # "" = all tenants; "remote" etc. to scope the cockpit (M16 remote jobs)
+    "assistant_kanban_tenant": "",
 }
 
 

@@ -32,6 +32,7 @@ from PyObjCTools import AppHelper
 
 from explain_controller import URL_PANE_ACCESSIBILITY
 
+from assistant.controller import AssistantController
 from config import ConfigStore, asset_dir
 from explain_controller import ExplainController
 from health import ServerHealthMonitor
@@ -43,6 +44,7 @@ from result_panel import ResultPanelController
 _controller = None
 _explain = None
 _health = None
+_assistant = None
 _ax_waiter = None
 _ui_auditor = None
 _remote_relay = None
@@ -68,6 +70,10 @@ class _RemoteCommandRelay(NSObject):
     def remoteShowHistory_(self, note):
         print("remote: showHistory", flush=True)
         self._main_window.showHistory()
+
+    def remoteAssistantShowTasks_(self, note):
+        print("remote: assistant.showTasks", flush=True)
+        self._main_window.showAssistant()
 
 
 class _UIAuditor(NSObject):
@@ -196,7 +202,8 @@ class _AXGrantWaiter(NSObject):
 
 
 def main():
-    global _controller, _explain, _health, _ax_waiter, _ui_auditor, _remote_relay
+    global _controller, _explain, _health, _assistant
+    global _ax_waiter, _ui_auditor, _remote_relay
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     # Machine-readable TCC probe for install.sh / `macsist doctor` (M10):
@@ -276,6 +283,11 @@ def main():
     main_window.on_reask = _explain.resubmit_text
     main_window.on_reask_image = _explain.resubmit_image
     _explain.on_open_history = main_window.toggleHistory
+    # M13: assistant subsystem — read-only kanban cockpit + menu-bar badge.
+    # Constructed after the menu bar/window exist; wires the board monitor to
+    # the badge + 작업 tab. The proactive engine arrives in M14.
+    _assistant = AssistantController(config, _controller, main_window)
+    _assistant.start()
     # M10: `macsist settings|history` IPC (distributed notifications).
     _remote_relay = _RemoteCommandRelay.alloc().initWithMainWindow_(main_window)
     dist_center = NSDistributedNotificationCenter.defaultCenter()
@@ -284,6 +296,10 @@ def main():
     )
     dist_center.addObserver_selector_name_object_(
         _remote_relay, "remoteShowHistory:", "com.macsist.showHistory", None
+    )
+    dist_center.addObserver_selector_name_object_(
+        _remote_relay, "remoteAssistantShowTasks:",
+        "com.macsist.assistant.showTasks", None
     )
     # M11 hook: switch the language like a Settings save would, at given
     # times — live-switch verification. Format: "<sec>:<code>[,<sec>:<code>…]"

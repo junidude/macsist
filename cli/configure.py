@@ -198,6 +198,27 @@ def cmd_probe(args):
                       "detail": f"접속 불가: {exc}"}, ok=False)
 
 
+def cmd_tasks(args):
+    """M13: print the Hermes kanban board (read-only). Works without the app
+    running — reads kanban.db directly (CLI fallback inside HermesBridge)."""
+    from assistant.hermes_bridge import HermesBridge
+    store = ConfigStore()
+    bridge = HermesBridge(store)
+    tasks = bridge.board_tasks()
+    if getattr(args, "json", False):
+        return _emit(tasks)
+    if not tasks:
+        print("표시할 작업이 없습니다 (kanban 보드 비어 있음 또는 Hermes 미설치)")
+        return 0
+    for task in tasks:
+        status = str(task.get("status", "") or "?")
+        title = str(task.get("title", "") or "—")
+        tenant = str(task.get("tenant", "") or "")
+        suffix = f"  ({tenant})" if tenant else ""
+        print(f"· [{status}] {title}{suffix}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -223,6 +244,9 @@ def main():
 
     sub.add_parser("probe")
 
+    p = sub.add_parser("tasks")
+    p.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     handler = {
         "status": cmd_status,
@@ -230,6 +254,7 @@ def main():
         "set-api-provider": cmd_set_api_provider,
         "set-language": cmd_set_language,
         "probe": cmd_probe,
+        "tasks": cmd_tasks,
     }[args.cmd]
     sys.exit(handler(args))
 

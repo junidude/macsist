@@ -6,6 +6,7 @@
 #   macsist status             agents, health, provider/models, TCC
 #   macsist logs [app|server] [-f]
 #   macsist settings|history   open the main window (distributed notification)
+#   macsist tasks              show the Hermes kanban board (read-only, M13)
 #   macsist doctor             full diagnosis (✓/✗ per check)
 #   macsist update             git pull + redeploy
 #
@@ -180,6 +181,13 @@ post_notification() {
     "$NOTIFY_BIN" "$1"
 }
 
+cmd_tasks() {  # M13: read-only Hermes kanban board + focus the 작업 tab if running
+    "$(pybin)" "$CONFIGURE" tasks || echo "작업을 읽을 수 없습니다 (Hermes kanban 없음)"
+    if [[ -x "$NOTIFY_BIN" ]] && agent_loaded "$APP_LABEL"; then
+        "$NOTIFY_BIN" "com.macsist.assistant.showTasks" >/dev/null 2>&1 || true
+    fi
+}
+
 cmd_doctor() {
     load_cfg
     local fails=0
@@ -268,6 +276,29 @@ cmd_doctor() {
         check 0 $? "conda env llm-server" "install.sh 를 실행하세요"
     fi
 
+    echo "[Hermes 연동]"
+    local HERMES_BIN="$HOME/.local/bin/hermes"
+    local KANBAN_DB="$HOME/.hermes/kanban.db"
+    local GW_STATE="$HOME/.hermes/gateway_state.json"
+    [[ -x "$HERMES_BIN" ]]
+    check 0 $? "hermes CLI ($HERMES_BIN)" "비서는 Hermes 없이도 로컬 전용으로 동작"
+    [[ -f "$KANBAN_DB" ]]; check 0 $? "kanban 보드 ($KANBAN_DB)"
+    if [[ -f "$GW_STATE" ]]; then
+        local gw; gw="$(sed -n 's/.*"gateway_state":"\([^"]*\)".*/\1/p' "$GW_STATE" | head -1)"
+        if [[ "$gw" == running ]]; then
+            echo "  $C_OK Hermes 게이트웨이 running (Telegram/cron 전송 가능)"
+        else
+            echo "  $C_WARN Hermes 게이트웨이 ${gw:-unknown} — Telegram/cron 전송 불가 (hermes gateway restart)"
+        fi
+    else
+        echo "  $C_WARN Hermes 게이트웨이 상태 파일 없음 — 미설치/미실행"
+    fi
+    if [[ -f "$HOME/.hermes/.env" ]] && grep -qE '^[A-Za-z0-9_]*API_KEY=.+' "$HOME/.hermes/.env"; then
+        echo "  $C_OK Hermes 추론 키 설정됨"
+    else
+        echo "  · Hermes 추론 키 미설정 — 비서 두뇌는 Macsist 자체 LLM 사용(무관)"
+    fi
+
     echo
     if [[ "$fails" == 0 ]]; then
         echo "모든 핵심 점검 통과 ✨"
@@ -302,6 +333,7 @@ case "${1:-__default__}" in
     logs)    shift; cmd_logs "$@" ;;
     settings) post_notification "com.macsist.showSettings" ;;
     history)  post_notification "com.macsist.showHistory" ;;
+    tasks)   cmd_tasks ;;
     doctor)  cmd_doctor ;;
     update)  cmd_update ;;
     help|-h|--help) usage ;;

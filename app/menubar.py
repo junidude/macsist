@@ -71,6 +71,20 @@ class StatusItemController(NSObject):
         )
         self.settings_item.setTarget_(self)
         menu.addItem_(self.settings_item)
+        # 비서 (M13): read-only cockpit submenu + open-count badge on the parent
+        menu.addItem_(NSMenuItem.separatorItem())
+        self._assistant_badge = 0
+        self.assistant_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            t("menubar.assistant"), None, ""
+        )
+        assistant_menu = NSMenu.alloc().init()
+        self.assistant_tasks_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            t("menubar.assistant_tasks"), "openAssistant:", ""
+        )
+        self.assistant_tasks_item.setTarget_(self)
+        assistant_menu.addItem_(self.assistant_tasks_item)
+        self.assistant_item.setSubmenu_(assistant_menu)
+        menu.addItem_(self.assistant_item)
         menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             t("menubar.quit"), "terminate:", "q"
@@ -120,6 +134,8 @@ class StatusItemController(NSObject):
         """Re-resolve every menu title after a language change (M11)."""
         self.history_item.setTitle_(t("menubar.history"))
         self.settings_item.setTitle_(t("menubar.settings"))
+        self.assistant_tasks_item.setTitle_(t("menubar.assistant_tasks"))
+        self.updateAssistantBadge_(self._assistant_badge)
         self.quit_item.setTitle_(t("menubar.quit"))
         self.setServerState_(self._server_state)
         print(f"menubar relabeled lang={current_language()}", flush=True)
@@ -150,8 +166,21 @@ class StatusItemController(NSObject):
             button.setImage_(None)
             button.setTitle_(fallback)
 
+    def updateAssistantBadge_(self, count):
+        """Main thread (AssistantMonitor marshals via callAfter). Show the
+        open-task count on the 비서 menu — M13 mirrors the kanban board; M14
+        will count pending confirm/never_auto proposals instead."""
+        self._assistant_badge = int(count)
+        title = t("menubar.assistant")
+        if self._assistant_badge > 0:
+            title = f"{title} ({self._assistant_badge})"
+        self.assistant_item.setTitle_(title)
+
     def openSettings_(self, sender):
         self.main_window.showSettings()
 
     def openHistory_(self, sender):
         self.main_window.showHistory()
+
+    def openAssistant_(self, sender):
+        self.main_window.showAssistant()
