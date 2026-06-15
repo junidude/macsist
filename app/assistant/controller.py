@@ -48,6 +48,9 @@ class AssistantController:
         main_window.on_assistant_approve = self.approve
         main_window.on_assistant_skip = self.skip
         main_window.on_assistant_snooze = self.snooze
+        main_window.on_assistant_propose = self.handlePropose_
+        main_window.on_assistant_new_thread = self.new_thread
+        main_window.on_assistant_scan = self.handleScan
         self.proposals.on_changed = lambda: AppHelper.callAfter(self._refresh)
 
     def start(self):
@@ -129,6 +132,15 @@ class AssistantController:
 
     def handleScan(self):
         self.proactive_monitor.poke()
+
+    def new_thread(self, text):
+        """Create a work thread directly from the tab's input (no LLM)."""
+        text = (text or "").strip()
+        if not text:
+            return
+        title = text.splitlines()[0][:120]
+        self.threads.create(title=title, source="manual", where_was_i=text[:500])
+        self._refresh()
 
     def showInbox(self):
         self.main_window.showAssistant()

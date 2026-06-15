@@ -92,6 +92,7 @@ from ui_kit import (
     FlippedView as _FlippedView,
     handle_edit_key_equivalent as _handle_edit_key_equivalent,
     make_pill as _make_pill,
+    make_round_field as _make_round_field,
 )
 
 # Liquid Glass (M8) — same guard as result_panel.py. Style 1 == clear
@@ -300,8 +301,13 @@ class MainWindowController(NSObject):
         self.on_assistant_approve = None
         self.on_assistant_skip = None
         self.on_assistant_snooze = None
+        self.on_assistant_propose = None     # text -> controller.handlePropose_
+        self.on_assistant_new_thread = None  # text -> controller.new_thread
+        self.on_assistant_scan = None        # -> controller.handleScan
         self.assistant_scroll = None
         self.assistant_doc = None
+        self.assistant_input = None
+        self._inbox = []  # pending proposals (index == button tag)
         self.table = None  # session list (right column)
         self.chat_scroll = None
         self.chat_doc = None
@@ -747,16 +753,68 @@ class MainWindowController(NSObject):
     def _buildAssistantTab_(self, container):
         size = container.frame().size
         cw, ch = size.width, size.height
+        bar_h = 44.0
+        inner_w = cw - 2 * PADDING
+        # top toolbar: input + 제안 / 스레드 추가 / 스캔
+        bar_y = ch - PADDING - bar_h
+        btn_w, btn_gap = 96.0, 8.0
+        field_w = inner_w - 3 * (btn_w + btn_gap)
+        box, field = _make_round_field(
+            NSMakeRect(PADDING, bar_y + 6, field_w, 32), 14.0)
+        field.setPlaceholderString_(t("assistant.input_placeholder"))
+        field.setTarget_(self)
+        field.setAction_("proposeClicked:")  # Return = 제안
+        self.assistant_input = field
+        container.addSubview_(box)
+        bx = PADDING + field_w + btn_gap
+        container.addSubview_(_make_pill(
+            t("assistant.propose"), self, "proposeClicked:",
+            NSMakeRect(bx, bar_y + 7, btn_w, 30)))
+        container.addSubview_(_make_pill(
+            t("assistant.new_thread"), self, "newThreadClicked:",
+            NSMakeRect(bx + btn_w + btn_gap, bar_y + 7, btn_w, 30)))
+        container.addSubview_(_make_pill(
+            t("assistant.scan"), self, "scanClicked:",
+            NSMakeRect(bx + 2 * (btn_w + btn_gap), bar_y + 7, btn_w, 30)))
+        # scroll area below the toolbar
         self.assistant_scroll = NSScrollView.alloc().initWithFrame_(
-            NSMakeRect(PADDING, PADDING, cw - 2 * PADDING, ch - 2 * PADDING)
+            NSMakeRect(PADDING, PADDING, inner_w, bar_y - PADDING)
         )
         self.assistant_scroll.setHasVerticalScroller_(True)
         self.assistant_scroll.setDrawsBackground_(False)
         self.assistant_doc = _FlippedView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, cw - 2 * PADDING, 10)
+            NSMakeRect(0, 0, inner_w, 10)
         )
         self.assistant_scroll.setDocumentView_(self.assistant_doc)
         container.addSubview_(self.assistant_scroll)
+
+    # -- assistant tab actions --
+
+    def proposeClicked_(self, sender):
+        text = str(self.assistant_input.stringValue()).strip()
+        if text and self.on_assistant_propose is not None:
+            self.on_assistant_propose(text)
+            self.assistant_input.setStringValue_("")
+
+    def newThreadClicked_(self, sender):
+        text = str(self.assistant_input.stringValue()).strip()
+        if text and self.on_assistant_new_thread is not None:
+            self.on_assistant_new_thread(text)
+            self.assistant_input.setStringValue_("")
+
+    def scanClicked_(self, sender):
+        if self.on_assistant_scan is not None:
+            self.on_assistant_scan()
+
+    def approveProposal_(self, sender):
+        idx = int(sender.tag())
+        if 0 <= idx < len(self._inbox) and self.on_assistant_approve is not None:
+            self.on_assistant_approve(self._inbox[idx].get("id"))
+
+    def skipProposal_(self, sender):
+        idx = int(sender.tag())
+        if 0 <= idx < len(self._inbox) and self.on_assistant_skip is not None:
+            self.on_assistant_skip(self._inbox[idx].get("id"))
 
     def refreshAssistant(self):
         """Re-render the 비서 tab: work threads (M14, "어디까지 했더라") + the
@@ -773,18 +831,33 @@ class MainWindowController(NSObject):
                 tasks = self.assistant_bridge.board_tasks()
             except Exception as exc:  # a read must never break the window
                 print(f"assistant tab: board read error {exc!r}", flush=True)
+        inbox = []
+        if self.assistant_proposals is not None:
+            try:
+                inbox = self.assistant_proposals.pending()
+            except Exception as exc:
+                print(f"assistant tab: inbox read error {exc!r}", flush=True)
+        self._inbox = inbox
         doc = self.assistant_doc
         if doc is None:
             return
         for sub in list(doc.subviews()):
             sub.removeFromSuperview()
         width = self.assistant_scroll.contentSize().width
-        th_h, task_h, gap = 88.0, 76.0, 8.0
+        inbox_h, th_h, task_h, gap = 100.0, 88.0, 76.0, 8.0
         total = 8.0
+        total += 30 + (len(inbox) * (inbox_h + gap) if inbox else 26)
         total += 30 + (len(threads) * (th_h + gap) if threads else 26)
         total += 30 + (len(tasks) * (task_h + gap) if tasks else 26)
         doc.setFrameSize_(NSMakeSize(width, total))
         y = 4.0
+        y = _assistant_section(doc, y, width, t("menubar.assistant_inbox"))
+        if inbox:
+            for i in range(len(inbox)):
+                self._addProposalCardTo_y_width_index_(doc, y, width, i)
+                y += inbox_h + gap
+        else:
+            y = _assistant_empty(doc, y, width, t("assistant.inbox_empty"))
         y = _assistant_section(doc, y, width, t("assistant.threads_title"))
         if threads:
             for th in threads:
@@ -919,6 +992,68 @@ class MainWindowController(NSObject):
             n.setLineBreakMode_(NSLineBreakByTruncatingTail)
             n.setFrame_(NSMakeRect(pad, 10, card_w - 2 * pad, 17))
             inner.addSubview_(n)
+
+        doc.addSubview_(box)
+
+    def _addProposalCardTo_y_width_index_(self, doc, y, width, index):
+        from AppKit import (
+            NSBezelStyleRounded,
+            NSLineBreakByTruncatingTail,
+            NSTextAlignmentRight,
+        )
+
+        prop = self._inbox[index]
+        card_w, card_h, pad = width - 8, 100.0, 12.0
+        box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
+        box.setBoxType_(NSBoxCustom)
+        box.setTitlePosition_(0)
+        box.setBorderWidth_(0.0)
+        box.setCornerRadius_(10.0)
+        box.setContentViewMargins_(NSMakeSize(0, 0))
+        box.setFillColor_(
+            NSColor.textBackgroundColor().colorWithAlphaComponent_(0.6)
+        )
+        inner = box.contentView()
+
+        title = NSTextField.labelWithString_(str(prop.get("title") or "—"))
+        title.setFont_(NSFont.boldSystemFontOfSize_(14.0))
+        title.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        title.setFrame_(NSMakeRect(pad, card_h - 28, card_w - 2 * pad - 90, 19))
+        inner.addSubview_(title)
+
+        risk = str(prop.get("risk") or "")
+        if risk:
+            rb = NSTextField.labelWithString_(risk)
+            rb.setFont_(NSFont.systemFontOfSize_(10.0))
+            rb.setTextColor_(NSColor.tertiaryLabelColor())
+            rb.setAlignment_(NSTextAlignmentRight)
+            rb.setFrame_(NSMakeRect(card_w - pad - 90, card_h - 26, 90, 14))
+            inner.addSubview_(rb)
+
+        rat = str(prop.get("rationale") or "").replace("\n", " ").strip()
+        if rat:
+            r = NSTextField.labelWithString_(rat)
+            r.setFont_(NSFont.systemFontOfSize_(12.0))
+            r.setTextColor_(NSColor.secondaryLabelColor())
+            r.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            r.setFrame_(NSMakeRect(pad, card_h - 50, card_w - 2 * pad, 17))
+            inner.addSubview_(r)
+
+        approve = NSButton.alloc().initWithFrame_(NSMakeRect(pad, 12, 96, 28))
+        approve.setTitle_(t("assistant.approve"))
+        approve.setBezelStyle_(NSBezelStyleRounded)
+        approve.setTag_(index)
+        approve.setTarget_(self)
+        approve.setAction_("approveProposal:")
+        inner.addSubview_(approve)
+
+        skip = NSButton.alloc().initWithFrame_(NSMakeRect(pad + 104, 12, 96, 28))
+        skip.setTitle_(t("assistant.skip"))
+        skip.setBezelStyle_(NSBezelStyleRounded)
+        skip.setTag_(index)
+        skip.setTarget_(self)
+        skip.setAction_("skipProposal:")
+        inner.addSubview_(skip)
 
         doc.addSubview_(box)
 

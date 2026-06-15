@@ -42,7 +42,11 @@ def current_language():
 
 def t(key):
     value = STRINGS.get(_lang, {}).get(key)
-    return value if value is not None else STRINGS["ko"][key]
+    if value is not None:
+        return value
+    # Fall back to Korean, then to the key itself — a missing string must never
+    # raise (an NSException from a UI build crashes the whole app).
+    return STRINGS["ko"].get(key, key)
 
 
 def prompt_default(key, lang):
@@ -128,6 +132,11 @@ STRINGS = {
         "assistant.tasks_title": "칸반 작업",
         "assistant.resume": "이어서",
         "assistant.no_threads": "작업 스레드가 없습니다",
+        "assistant.input_placeholder": "할 일이나 메모 입력…",
+        "assistant.new_thread": "스레드 추가",
+        "assistant.propose": "제안",
+        "assistant.scan": "스캔",
+        "assistant.inbox_empty": "받은 작업함이 비어 있습니다",
         "settings.section_assistant": "비서",
         "settings.assistant_proactive_title": "능동 제안",
         "settings.assistant_proactive_desc": "멈춘 작업을 스스로 찾아 먼저 제안합니다",
@@ -318,6 +327,11 @@ STRINGS = {
         "assistant.tasks_title": "Kanban tasks",
         "assistant.resume": "Resume",
         "assistant.no_threads": "No work threads",
+        "assistant.input_placeholder": "Enter a task or note…",
+        "assistant.new_thread": "Add thread",
+        "assistant.propose": "Propose",
+        "assistant.scan": "Scan",
+        "assistant.inbox_empty": "Inbox is empty",
         "settings.section_assistant": "Assistant",
         "settings.assistant_proactive_title": "Proactive suggestions",
         "settings.assistant_proactive_desc": "Find stalled work and suggest it first",
@@ -484,6 +498,11 @@ STRINGS = {
         "assistant.tasks_title": "看板任务",
         "assistant.resume": "继续",
         "assistant.no_threads": "暂无工作线程",
+        "assistant.input_placeholder": "输入任务或备忘…",
+        "assistant.new_thread": "添加线程",
+        "assistant.propose": "建议",
+        "assistant.scan": "扫描",
+        "assistant.inbox_empty": "收件箱为空",
         "settings.section_assistant": "助手",
         "settings.assistant_proactive_title": "主动建议",
         "settings.assistant_proactive_desc": "自动发现停滞的工作并先行建议",
@@ -651,6 +670,11 @@ STRINGS = {
         "assistant.tasks_title": "カンバン タスク",
         "assistant.resume": "再開",
         "assistant.no_threads": "作業スレッドがありません",
+        "assistant.input_placeholder": "タスクやメモを入力…",
+        "assistant.new_thread": "スレッド追加",
+        "assistant.propose": "提案",
+        "assistant.scan": "スキャン",
+        "assistant.inbox_empty": "受信箱は空です",
         "settings.section_assistant": "アシスタント",
         "settings.assistant_proactive_title": "能動的な提案",
         "settings.assistant_proactive_desc": "停滞した作業を見つけて先に提案します",
@@ -818,6 +842,11 @@ STRINGS = {
         "assistant.tasks_title": "Tâches Kanban",
         "assistant.resume": "Reprendre",
         "assistant.no_threads": "Aucun fil de travail",
+        "assistant.input_placeholder": "Saisir une tâche ou une note…",
+        "assistant.new_thread": "Ajouter un fil",
+        "assistant.propose": "Proposer",
+        "assistant.scan": "Analyser",
+        "assistant.inbox_empty": "Boîte de réception vide",
         "settings.section_assistant": "Assistant",
         "settings.assistant_proactive_title": "Suggestions proactives",
         "settings.assistant_proactive_desc": "Trouve le travail en pause et le propose",
@@ -985,6 +1014,11 @@ STRINGS = {
         "assistant.tasks_title": "Kanban-Aufgaben",
         "assistant.resume": "Fortsetzen",
         "assistant.no_threads": "Keine Arbeitsstränge",
+        "assistant.input_placeholder": "Aufgabe oder Notiz eingeben…",
+        "assistant.new_thread": "Strang hinzufügen",
+        "assistant.propose": "Vorschlagen",
+        "assistant.scan": "Scannen",
+        "assistant.inbox_empty": "Eingang ist leer",
         "settings.section_assistant": "Assistent",
         "settings.assistant_proactive_title": "Proaktive Vorschläge",
         "settings.assistant_proactive_desc": "Findet pausierte Arbeit und schlägt sie vor",
