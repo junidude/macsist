@@ -444,7 +444,7 @@ RISK = {
 result_panel) 최대 재사용. **모든 마일스톤은 Hermes 게이트웨이 가용성에 의존하지 않음**
 (Telegram은 게이트웨이-옵셔널, 두뇌는 Macsist).
 
-### M13 — 읽기전용 cockpit + 브리지 강화 (3~4일)
+### M13 — 읽기전용 cockpit + 브리지 강화 (3~4일) — ✅ 출시 (2026-06-15)
 - **목표:** Hermes seam을 실제 `--json` 출력에 대해 굳히기, 쓰기 0.
 - **출시:** `hermes_bridge.py`(RO kanban.db WAL 읽기 + `hermes kanban list --json` 드라이버),
   `AssistantMonitor`(health 클론) + 메뉴바 배지, main_window.py "작업" 탭(kanban 카드 렌더),
@@ -453,7 +453,7 @@ result_panel) 최대 재사용. **모든 마일스톤은 Hermes 게이트웨이 
 - **검수:** 터미널에서 `hermes kanban create` → 한 폴 안에 Macsist 작업 탭에 등장.
 - **MVP=전체.**
 
-### M14 — confirm-then-execute 루프 (로컬 두뇌) (~1.5주, 핵심 산출물)
+### M14 — confirm-then-execute 루프 (로컬 두뇌) (~1.5주, 핵심 산출물) — ✅ 출시 (2026-06-15)
 - **목표:** "어디까지 했더라" 사망 + propose-first 실증, inert 인프라 베팅 없이.
 - **출시:** `ThreadStore`/`SeenStore`, `proposal_store.py`/`audit_store.py`/`risk.py`,
   `proactive.py`(StaleThread+OverdueTodo+수동 todo_add), `proposal_panel.py`(result_panel 재사용,

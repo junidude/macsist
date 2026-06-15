@@ -31,6 +31,15 @@ switching; M12: real signed **Macsist.app** bundle — py2app standalone build
 unusable), fixed self-signed "Macsist Signing" identity so TCC survives every
 redeploy, installed at `…/Application Support/Macsist/Macsist.app`, launchd
 runs the bundle executable — as-built notes in `docs/SPEC.md` §5.5–5.8).
+**M13–M14 shipped** — the **Assistant** subsystem (`app/assistant/`): M13
+read-only kanban cockpit over Hermes (`hermes_bridge` = RO `~/.hermes/kanban.db`
++ `hermes` CLI, never writes the DB) + 작업 tab + menu-bar badge; M14
+propose-then-confirm engine (local M9 brain, zero Hermes-gateway dependency) —
+work threads ("어디까지 했더라"), deterministic `kind→risk` + structural
+`assert_approved` gate (no side effect without a user approval row),
+ProposalPanel, `macsist propose|approve|scan|inbox|tasks`. Full design + the
+M15–M18 roadmap (Telegram / remote Claude Code·Codex / Gmail / Calendar):
+**`docs/ASSISTANT.md`**.
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit
