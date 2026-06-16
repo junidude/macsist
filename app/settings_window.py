@@ -263,6 +263,7 @@ class SettingsPaneController(NSObject):
         self.assistant_interval_field.setStringValue_(
             f"{float(self.config.get('assistant_proactive_interval')):g}"
         )
+        self.status_label.setTextColor_(NSColor.secondaryLabelColor())
         self.status_label.setStringValue_("")
         print("settings pane refreshed", flush=True)
 
@@ -1020,12 +1021,14 @@ class SettingsPaneController(NSObject):
         if error is None:
             advanced, error = self._collectAdvanced()
         if error:
+            self.status_label.setTextColor_(NSColor.systemRedColor())
             self.status_label.setStringValue_("⚠ " + error)
             print("settings NOT saved:", error, flush=True)
             return
         try:
             self._commitKeychain()
         except keychain.KeychainError as err:
+            self.status_label.setTextColor_(NSColor.systemRedColor())
             self.status_label.setStringValue_("⚠ " + str(err))
             print("settings NOT saved:", err, flush=True)
             return
@@ -1074,6 +1077,7 @@ class SettingsPaneController(NSObject):
         self.config.save()
         if self.on_saved is not None:
             self.on_saved()  # re-register hotkeys + rebuild the result panel
+        self.status_label.setTextColor_(NSColor.systemGreenColor())
         self.status_label.setStringValue_(t("settings.saved"))
         active = self.config.active_provider()  # never log keys, only refs
         print(

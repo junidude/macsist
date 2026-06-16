@@ -398,6 +398,11 @@ class MainWindowController(NSObject):
 
     def windowWillClose_(self, notification):
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        # Drop the window so the next open rebuilds fresh — this is how 창 모양
+        # (window glass/opacity) and other appearance changes take effect after
+        # a Settings save, without rebuilding mid-session (which reset scroll).
+        self.window = None
+        self.tab_view = None
         print("main window closed -> Accessory policy", flush=True)
 
     def _refreshTab_(self, tab_id):

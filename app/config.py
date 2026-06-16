@@ -178,6 +178,9 @@ DEFAULTS = {
 # on-disk value still equals a stale default the user never customized it —
 # drop it and let the current default apply. Customized values are never touched.
 _SUPERSEDED_DEFAULTS = {
+    # 창 가독성(사용자 피드백): 0.5는 옛 glass_window_tint_alpha 기본값이 새 키로
+    # 새어든 것 — 사용자가 직접 고른 값이 아니면 0.9(불투명) 기본으로 끌어올린다.
+    "window_tint_alpha": (0.5,),
     # M8 폴리시: clear 전면 적용이 과해서 regular+틴트로 후퇴 (사용자 피드백)
     "glass_style": ("clear",),
     "panel_corner_radius": (16.0,),
