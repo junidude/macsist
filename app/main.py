@@ -316,6 +316,9 @@ def main():
     main_window.on_reask = _explain.resubmit_text
     main_window.on_reask_image = _explain.resubmit_image
     _explain.on_open_history = main_window.toggleHistory
+    # M14: the 비서 "답변" button answers a request inline via the explain
+    # controller's streaming glass panel (reuses follow-up + cancellation).
+    main_window.on_assistant_answer = _explain.answer_question
     # M10: `macsist settings|history` IPC (distributed notifications).
     _remote_relay = _RemoteCommandRelay.alloc().initWithMainWindow_assistant_(
         main_window, _assistant)

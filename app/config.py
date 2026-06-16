@@ -223,7 +223,8 @@ _LANG_KEYS = ("system_prompt_text", "system_prompt_image",
               "user_prompt_image", "detail_levels",
               # M14 assistant prompts (resolved per language at get() time)
               "assistant_propose_system", "assistant_digest_user",
-              "assistant_resume_system", "assistant_resume_user")
+              "assistant_resume_system", "assistant_resume_user",
+              "assistant_answer_system")
 
 
 def _migrate_providers(on_disk):

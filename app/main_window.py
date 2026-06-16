@@ -301,6 +301,7 @@ class MainWindowController(NSObject):
         self.on_assistant_approve = None
         self.on_assistant_skip = None
         self.on_assistant_snooze = None
+        self.on_assistant_answer = None      # text -> explain.answer_question
         self.on_assistant_propose = None     # text -> controller.handlePropose_
         self.on_assistant_new_thread = None  # text -> controller.new_thread
         self.on_assistant_scan = None        # -> controller.handleScan
@@ -763,25 +764,26 @@ class MainWindowController(NSObject):
         inner_w = cw - 2 * PADDING
         # top toolbar: input + 제안 / 스레드 추가 / 스캔
         bar_y = ch - PADDING - bar_h
-        btn_w, btn_gap = 96.0, 8.0
-        field_w = inner_w - 3 * (btn_w + btn_gap)
+        btn_w, btn_gap = 92.0, 8.0
+        buttons = (
+            (t("assistant.answer_btn"), "answerClicked:"),
+            (t("assistant.propose"), "proposeClicked:"),
+            (t("assistant.new_thread"), "newThreadClicked:"),
+            (t("assistant.scan"), "scanClicked:"),
+        )
+        field_w = inner_w - len(buttons) * (btn_w + btn_gap)
         box, field = _make_round_field(
             NSMakeRect(PADDING, bar_y + 6, field_w, 32), 14.0)
         field.setPlaceholderString_(t("assistant.input_placeholder"))
         field.setTarget_(self)
-        field.setAction_("proposeClicked:")  # Return = 제안
+        field.setAction_("answerClicked:")  # Return = 답변(즉시 수행)
         self.assistant_input = field
         container.addSubview_(box)
         bx = PADDING + field_w + btn_gap
-        container.addSubview_(_make_pill(
-            t("assistant.propose"), self, "proposeClicked:",
-            NSMakeRect(bx, bar_y + 7, btn_w, 30)))
-        container.addSubview_(_make_pill(
-            t("assistant.new_thread"), self, "newThreadClicked:",
-            NSMakeRect(bx + btn_w + btn_gap, bar_y + 7, btn_w, 30)))
-        container.addSubview_(_make_pill(
-            t("assistant.scan"), self, "scanClicked:",
-            NSMakeRect(bx + 2 * (btn_w + btn_gap), bar_y + 7, btn_w, 30)))
+        for i, (label, action) in enumerate(buttons):
+            container.addSubview_(_make_pill(
+                label, self, action,
+                NSMakeRect(bx + i * (btn_w + btn_gap), bar_y + 7, btn_w, 30)))
         # scroll area below the toolbar
         self.assistant_scroll = NSScrollView.alloc().initWithFrame_(
             NSMakeRect(PADDING, PADDING, inner_w, bar_y - PADDING)
@@ -795,6 +797,12 @@ class MainWindowController(NSObject):
         container.addSubview_(self.assistant_scroll)
 
     # -- assistant tab actions --
+
+    def answerClicked_(self, sender):
+        text = str(self.assistant_input.stringValue()).strip()
+        if text and self.on_assistant_answer is not None:
+            self.on_assistant_answer(text)
+            self.assistant_input.setStringValue_("")
 
     def proposeClicked_(self, sender):
         text = str(self.assistant_input.stringValue()).strip()

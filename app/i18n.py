@@ -137,6 +137,7 @@ STRINGS = {
         "assistant.new_thread": "할 일 추가",
         "assistant.propose": "제안",
         "assistant.scan": "스캔",
+        "assistant.answer_btn": "답변",
         "assistant.inbox_empty": "받은 작업함이 비어 있습니다",
         "assistant.hermes_on": "Hermes 칸반 연결됨",
         "assistant.hermes_off": "Hermes 미연결",
@@ -348,6 +349,7 @@ STRINGS = {
         "assistant.new_thread": "Add to-do",
         "assistant.propose": "Propose",
         "assistant.scan": "Scan",
+        "assistant.answer_btn": "Answer",
         "assistant.inbox_empty": "Inbox is empty",
         "assistant.hermes_on": "Hermes kanban connected",
         "assistant.hermes_off": "Hermes not connected",
@@ -535,6 +537,7 @@ STRINGS = {
         "assistant.new_thread": "添加待办",
         "assistant.propose": "建议",
         "assistant.scan": "扫描",
+        "assistant.answer_btn": "回答",
         "assistant.inbox_empty": "收件箱为空",
         "assistant.hermes_on": "Hermes 看板已连接",
         "assistant.hermes_off": "Hermes 未连接",
@@ -723,6 +726,7 @@ STRINGS = {
         "assistant.new_thread": "やること追加",
         "assistant.propose": "提案",
         "assistant.scan": "スキャン",
+        "assistant.answer_btn": "回答",
         "assistant.inbox_empty": "受信箱は空です",
         "assistant.hermes_on": "Hermes カンバン接続済み",
         "assistant.hermes_off": "Hermes 未接続",
@@ -911,6 +915,7 @@ STRINGS = {
         "assistant.new_thread": "Ajouter une tâche",
         "assistant.propose": "Proposer",
         "assistant.scan": "Analyser",
+        "assistant.answer_btn": "Répondre",
         "assistant.inbox_empty": "Boîte de réception vide",
         "assistant.hermes_on": "Kanban Hermes connecté",
         "assistant.hermes_off": "Hermes non connecté",
@@ -1099,6 +1104,7 @@ STRINGS = {
         "assistant.new_thread": "To-do hinzufügen",
         "assistant.propose": "Vorschlagen",
         "assistant.scan": "Scannen",
+        "assistant.answer_btn": "Antworten",
         "assistant.inbox_empty": "Eingang ist leer",
         "assistant.hermes_on": "Hermes-Kanban verbunden",
         "assistant.hermes_off": "Hermes nicht verbunden",
@@ -1269,6 +1275,10 @@ PROMPT_DEFAULTS = {
             "\"next_action\": \"...\"}"
         ),
         "assistant_resume_user": "스레드 정보:\n<<CONTEXT>>",
+        "assistant_answer_system": (
+            "너는 사용자를 돕는 유능한 비서다. 요청에 한국어로 간결하고 정확하게 "
+            "답하라. 불필요한 군더더기는 빼라."
+        ),
         "detail_levels": {
             "brief": {
                 "label": "간단",
@@ -1326,6 +1336,10 @@ PROMPT_DEFAULTS = {
             "{\"where_was_i\": \"...\", \"next_action\": \"...\"}"
         ),
         "assistant_resume_user": "Thread info:\n<<CONTEXT>>",
+        "assistant_answer_system": (
+            "You are a capable assistant. Answer the request concisely and "
+            "accurately in English. No filler."
+        ),
         "detail_levels": {
             "brief": {
                 "label": "Brief",
@@ -1370,6 +1384,9 @@ PROMPT_DEFAULTS = {
             "对象：{\"where_was_i\": \"...\", \"next_action\": \"...\"}"
         ),
         "assistant_resume_user": "线程信息：\n<<CONTEXT>>",
+        "assistant_answer_system": (
+            "你是得力的助手。用简体中文简洁、准确地回答请求，不要废话。"
+        ),
         "detail_levels": {
             "brief": {
                 "label": "简短",
@@ -1415,6 +1432,10 @@ PROMPT_DEFAULTS = {
             "{\"where_was_i\": \"...\", \"next_action\": \"...\"}"
         ),
         "assistant_resume_user": "スレッド情報:\n<<CONTEXT>>",
+        "assistant_answer_system": (
+            "あなたは有能なアシスタントだ。要望に日本語で簡潔かつ正確に答えよ。"
+            "無駄を省け。"
+        ),
         "detail_levels": {
             "brief": {
                 "label": "簡単",
@@ -1468,6 +1489,10 @@ PROMPT_DEFAULTS = {
             "objet JSON : {\"where_was_i\": \"...\", \"next_action\": \"...\"}"
         ),
         "assistant_resume_user": "Infos du fil :\n<<CONTEXT>>",
+        "assistant_answer_system": (
+            "Tu es un assistant compétent. Réponds à la demande de façon "
+            "concise et exacte en français, sans superflu."
+        ),
         "detail_levels": {
             "brief": {
                 "label": "Bref",
@@ -1520,6 +1545,10 @@ PROMPT_DEFAULTS = {
             "JSON-Objekt aus: {\"where_was_i\": \"...\", \"next_action\": \"...\"}"
         ),
         "assistant_resume_user": "Strang-Infos:\n<<CONTEXT>>",
+        "assistant_answer_system": (
+            "Du bist ein fähiger Assistent. Beantworte die Anfrage knapp und "
+            "genau auf Deutsch, ohne Füllwörter."
+        ),
         "detail_levels": {
             "brief": {
                 "label": "Kurz",

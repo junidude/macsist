@@ -265,6 +265,34 @@ class ExplainController:
             target=self._runRegion, args=(gen, handle), daemon=True
         ).start()
 
+    def answer_question(self, text):
+        """M14: the 비서 actually does/answers a free-form request (no side
+        effect) — streamed into the result panel like explain, follow-up and
+        all. Called from the 비서 tab's 답변 button (main thread)."""
+        text = (text or "").strip()
+        if not text:
+            return
+        loc = CGEventGetLocation(CGEventCreate(None))
+        cursor_tl = (loc.x, loc.y)
+        gen, handle = self._preempt()
+        print(f"assistant answer gen={gen}", flush=True)
+        threading.Thread(
+            target=self._runAnswer, args=(gen, handle, cursor_tl, text),
+            daemon=True,
+        ).start()
+
+    def _runAnswer(self, gen, handle, cursor_tl, text):
+        if handle.cancelled:
+            return
+        # centered on screen (the request comes from the window, not the cursor)
+        self._onMain(gen, self.panel.beginSessionAt_centered_, cursor_tl, True)
+        messages = [
+            {"role": "system",
+             "content": self.config.get("assistant_answer_system")},
+            {"role": "user", "content": text},
+        ]
+        self._stream(gen, handle, messages, mode="text")
+
     # -- worker thread ---------------------------------------------------------
 
     def _run(self, gen, handle, cursor_tl, preset_text=None):
