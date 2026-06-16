@@ -64,6 +64,31 @@ class HermesBridge:
         """An external board is connected (currently only Hermes)."""
         return self.backend() == "hermes"
 
+    def agent_available(self):
+        """True if the Hermes agent CLI can be invoked (for delegation)."""
+        return _resolvable(self._hermes_bin())
+
+    def run_agent(self, prompt, timeout=180):
+        """Delegate a task to the Hermes agent (one-shot `hermes chat -q`,
+        which works without the gateway). Returns (ok, text). Runs the agent
+        loop (tools, multi-step) using Hermes's own configured model. Safe from
+        a worker thread (subprocess + timeout)."""
+        bin_ = self._hermes_bin()
+        if not _resolvable(bin_):
+            return False, "Hermes CLI를 찾을 수 없습니다"
+        try:
+            out = subprocess.run(
+                [bin_, "chat", "-q", prompt],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"Hermes 응답 시간 초과({timeout}s)"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"Hermes 실행 실패: {exc}"
+        if out.returncode != 0:
+            return False, (out.stderr or out.stdout or "Hermes 오류").strip()[:400]
+        return True, _extract_agent_answer(out.stdout)
+
     # -- reads ---------------------------------------------------------------
 
     def list_tasks(self, tenant=None, limit=200):
@@ -200,6 +225,25 @@ class HermesBridge:
             return conn.execute(sql, params).fetchall()
         finally:
             conn.close()
+
+
+def _extract_agent_answer(stdout):
+    """Pull the answer out of `hermes chat -q` output — the text inside the
+    ╭─ Hermes ─╮ … ╰─╯ box (the CLI draws only top/bottom borders; content is
+    plain indented lines). Falls back to the raw output if the box is absent."""
+    lines = (stdout or "").splitlines()
+    inside, out = False, []
+    for line in lines:
+        s = line.strip()
+        if not inside and s.startswith("╭") and "Hermes" in s:
+            inside = True
+            continue
+        if inside and s.startswith("╰"):
+            break
+        if inside:
+            out.append(s.strip("│ ").rstrip())
+    answer = "\n".join(out).strip()
+    return answer or (stdout or "").strip()
 
 
 def _resolvable(path):

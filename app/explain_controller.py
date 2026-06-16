@@ -266,20 +266,61 @@ class ExplainController:
         ).start()
 
     def answer_question(self, text):
-        """M14: the 비서 actually does/answers a free-form request (no side
-        effect) — streamed into the result panel like explain, follow-up and
-        all. Called from the 비서 tab's 답변 button (main thread)."""
+        """M14: the 비서 does/answers a free-form request — ROUTED between the
+        local LLM (fast) and the Hermes agent (hard/agentic). Result streams
+        into the result panel. Called from the 비서 tab's 답변 button (main)."""
         text = (text or "").strip()
         if not text:
             return
         loc = CGEventGetLocation(CGEventCreate(None))
         cursor_tl = (loc.x, loc.y)
         gen, handle = self._preempt()
-        print(f"assistant answer gen={gen}", flush=True)
+        route = self._routeFor(text)
+        print(f"assistant answer gen={gen} route={route}", flush=True)
+        worker = self._runAnswerHermes if route == "hermes" else self._runAnswer
         threading.Thread(
-            target=self._runAnswer, args=(gen, handle, cursor_tl, text),
-            daemon=True,
+            target=worker, args=(gen, handle, cursor_tl, text), daemon=True,
         ).start()
+
+    def _routeFor(self, text):
+        """local (fast) vs hermes (agentic). Falls back to local when Hermes's
+        CLI isn't available, so routing is always safe."""
+        mode = str(self.config.get("assistant_route_mode") or "auto")
+        if mode == "local":
+            return "local"
+        avail = (self.assistant is not None
+                 and self.assistant.bridge.agent_available())
+        if not avail:
+            return "local"
+        if mode == "hermes":
+            return "hermes"
+        # auto: agentic / multi-step / long requests go to the Hermes agent
+        hints = (
+            "조사", "리서치", "검색", "찾아", "분석", "자동화", "크롤", "스크랩",
+            "배포", "실행", "코드", "깃허브", "github", "파일", "다운로드",
+            "스케줄", "cron", "여러 단계", "단계로", "리포트", "보고서",
+            "research", "search", "find ", "analyze", "crawl", "scrape",
+            "deploy", "build ", "schedule", "automate", "multi-step", "report",
+        )
+        low = text.lower()
+        if len(text) > 200 or any(k in low for k in hints):
+            return "hermes"
+        return "local"
+
+    def _runAnswerHermes(self, gen, handle, cursor_tl, text):
+        """Delegate to the Hermes agent (one-shot, ~10-60s) and show the result
+        in the panel. Marked '⚕ Hermes' so who answered is always visible."""
+        if handle.cancelled:
+            return
+        self._onMain(gen, self.panel.beginSessionAt_centered_, cursor_tl, True)
+        ok, answer = self.assistant.bridge.run_agent(text)
+        if handle.cancelled:
+            return
+        if not ok:
+            self._onMain(gen, self.panel.showErrorText_, "⚕ Hermes: " + answer)
+            return
+        self._onMain(gen, self.panel.appendChunk_, "⚕ Hermes\n\n" + answer)
+        self._onMain(gen, self.panel.finishStream)
 
     def _runAnswer(self, gen, handle, cursor_tl, text):
         if handle.cancelled:

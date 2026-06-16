@@ -144,6 +144,10 @@ DEFAULTS = {
     # "hermes" = force Hermes. OpenClaw/Pi/custom connectors come later — local
     # is first-class so the assistant works with no agent installed at all.
     "assistant_backend": "auto",
+    # 답변 라우팅: 쉬운 건 로컬 LLM(빠름), 어려운 건 Hermes 에이전트(도구·다단계).
+    # "auto" = 휴리스틱으로 어려우면 Hermes(가능할 때) / "local" = 항상 로컬 /
+    # "hermes" = 항상 Hermes. Hermes CLI가 없으면 어느 경우든 로컬로 폴백.
+    "assistant_route_mode": "auto",
     # The ONLY Hermes contact points (read-only DB + CLI). Keys never here.
     "assistant_kanban_db_path": "~/.hermes/kanban.db",
     "hermes_bin": "~/.local/bin/hermes",
