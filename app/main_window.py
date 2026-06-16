@@ -851,21 +851,23 @@ class MainWindowController(NSObject):
         for sub in list(doc.subviews()):
             sub.removeFromSuperview()
         width = self.assistant_scroll.contentSize().width
+        connected = bool(status.get("connected"))  # external agent (Hermes)
         inbox_h, th_h, task_h, gap = 100.0, 88.0, 76.0, 8.0
         total = 56.0  # status line + help line
         total += 30 + (len(inbox) * (inbox_h + gap) if inbox else 26)
         total += 30 + (len(threads) * (th_h + gap) if threads else 26)
-        total += 30 + (len(tasks) * (task_h + gap) if tasks else 26)
+        if connected:
+            total += 30 + (len(tasks) * (task_h + gap) if tasks else 26)
         doc.setFrameSize_(NSMakeSize(width, total))
         y = 4.0
-        conn = t("assistant.hermes_on") if status.get("connected") \
-            else t("assistant.hermes_off")
-        gw = t("assistant.gw_on") if status.get("gateway") == "running" \
-            else t("assistant.gw_off")
-        y = _assistant_empty(
-            doc, y, width,
-            f"⌁ {conn} · {gw} · {t('assistant.tasks_title')} "
-            f"{status.get('board_count', 0)}")
+        if connected:
+            gw = t("assistant.gw_on") if status.get("gateway") == "running" \
+                else t("assistant.gw_off")
+            line = (f"⌁ {t('assistant.hermes_on')} · {gw} · "
+                    f"{t('assistant.tasks_title')} {status.get('board_count', 0)}")
+        else:
+            line = t("assistant.local_only")
+        y = _assistant_empty(doc, y, width, line)
         y = _assistant_empty(doc, y, width, t("assistant.help_line"))
         y = _assistant_section(doc, y, width, t("menubar.assistant_inbox"))
         if inbox:
@@ -881,13 +883,14 @@ class MainWindowController(NSObject):
                 y += th_h + gap
         else:
             y = _assistant_empty(doc, y, width, t("assistant.no_threads"))
-        y = _assistant_section(doc, y, width, t("assistant.tasks_title"))
-        if tasks:
-            for task in tasks:
-                self._addKanbanCardTo_y_width_task_(doc, y, width, task)
-                y += task_h + gap
-        else:
-            y = _assistant_empty(doc, y, width, t("assistant.empty"))
+        if connected:  # external board section only when an agent is connected
+            y = _assistant_section(doc, y, width, t("assistant.tasks_title"))
+            if tasks:
+                for task in tasks:
+                    self._addKanbanCardTo_y_width_task_(doc, y, width, task)
+                    y += task_h + gap
+            else:
+                y = _assistant_empty(doc, y, width, t("assistant.empty"))
 
     def refreshAssistantIfVisible(self):
         """Called from AssistantController on a change — only redraw when the

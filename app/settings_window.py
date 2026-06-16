@@ -179,6 +179,7 @@ class SettingsPaneController(NSObject):
         self.followup_field = None
         self.template_kwargs_field = None
         # 비서 (M14): proactive toggle + trust dial + interval
+        self.assistant_backend_popup = None
         self.assistant_proactive_switch = None
         self.assistant_autonomy_popup = None
         self.assistant_interval_field = None
@@ -247,6 +248,11 @@ class SettingsPaneController(NSObject):
         )
         self.template_kwargs_field.setStringValue_(
             json.dumps(self.config.get("chat_template_kwargs"), ensure_ascii=False)
+        )
+        backend = str(self.config.get("assistant_backend"))
+        backends = ["auto", "local", "hermes"]
+        self.assistant_backend_popup.selectItemAtIndex_(
+            backends.index(backend) if backend in backends else 0
         )
         self.assistant_proactive_switch.setState_(
             1 if self.config.get("assistant_proactive_enabled") else 0
@@ -588,6 +594,17 @@ class SettingsPaneController(NSObject):
         # ---- 비서 (M14) ----
         section(t("settings.section_assistant"))
 
+        def build_backend(inner, row_y):
+            titled(inner, row_y, t("settings.assistant_backend_title"),
+                   t("settings.assistant_backend_desc"))
+            popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                control_frame(row_y, 220), False)
+            for lk in ("settings.backend_auto", "settings.backend_local",
+                       "settings.backend_hermes"):
+                popup.addItemWithTitle_(t(lk))
+            inner.addSubview_(popup)
+            self.assistant_backend_popup = popup
+
         def build_proactive(inner, row_y):
             titled(inner, row_y, t("settings.assistant_proactive_title"),
                    t("settings.assistant_proactive_desc"))
@@ -609,7 +626,8 @@ class SettingsPaneController(NSObject):
         interval_holder, interval_row = field_row(
             t("settings.assistant_interval_title"),
             t("settings.assistant_interval_desc"), w=120)
-        card([(ROW_H, build_proactive), (ROW_H, build_autonomy), interval_row])
+        card([(ROW_H, build_backend), (ROW_H, build_proactive),
+              (ROW_H, build_autonomy), interval_row])
         self.assistant_interval_field = interval_holder["field"]
 
         # ---- 단축키 ----
@@ -1030,6 +1048,10 @@ class SettingsPaneController(NSObject):
         for key, value in advanced.items():
             self.config.set(key, value)
         # 비서 (M14)
+        backends = ["auto", "local", "hermes"]
+        bi = self.assistant_backend_popup.indexOfSelectedItem()
+        self.config.set("assistant_backend",
+                        backends[bi] if 0 <= bi < len(backends) else "auto")
         self.config.set("assistant_proactive_enabled",
                         bool(self.assistant_proactive_switch.state()))
         self.config.set(

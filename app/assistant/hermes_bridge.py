@@ -48,13 +48,29 @@ class HermesBridge:
         return os.path.expanduser(str(self.config.get("hermes_bin")))
 
     def available(self):
-        """True if the board is readable somehow (db file or hermes CLI)."""
+        """True if Hermes is readable (db file or hermes CLI present)."""
         return self._db_path().exists() or _resolvable(self._hermes_bin())
+
+    def backend(self):
+        """The resolved agent backend: 'hermes' or 'local'. 'auto' picks Hermes
+        only when it's actually present, so a machine without Hermes is a clean
+        local-only assistant (no kanban section, no Hermes references)."""
+        choice = str(self.config.get("assistant_backend") or "auto").lower()
+        if choice == "auto":
+            return "hermes" if self.available() else "local"
+        return choice if choice in ("local", "hermes") else "local"
+
+    def is_active(self):
+        """An external board is connected (currently only Hermes)."""
+        return self.backend() == "hermes"
 
     # -- reads ---------------------------------------------------------------
 
     def list_tasks(self, tenant=None, limit=200):
-        """All kanban tasks, newest first. RO sqlite → CLI fallback → []."""
+        """All kanban tasks, newest first. RO sqlite → CLI fallback → []. Empty
+        when the backend is local (no external agent)."""
+        if self.backend() != "hermes":
+            return []
         if tenant is None:
             tenant = str(self.config.get("assistant_kanban_tenant")) or None
         try:
@@ -68,10 +84,12 @@ class HermesBridge:
         return tasks[:limit]
 
     def status(self):
-        """Connection status for the 비서 tab header: is the board readable,
-        is the gateway running (Telegram/cron — M15+), how many tasks."""
-        db = self._db_path()
-        connected = db.exists() or _resolvable(self._hermes_bin())
+        """Connection status for the 비서 tab header: which backend, connected?,
+        gateway (Hermes only — Telegram/cron, M15+), task count."""
+        backend = self.backend()
+        if backend != "hermes":
+            return {"backend": "local", "connected": False,
+                    "gateway": "n/a", "board_count": 0}
         gateway = "unknown"
         gs = Path(os.path.expanduser("~/.hermes/gateway_state.json"))
         try:
@@ -81,9 +99,10 @@ class HermesBridge:
         except (OSError, ValueError):
             pass
         return {
-            "connected": connected,
+            "backend": "hermes",
+            "connected": True,
             "gateway": gateway,
-            "board_count": len(self.board_tasks()) if connected else 0,
+            "board_count": len(self.board_tasks()),
         }
 
     def board_tasks(self, tenant=None, limit=200):

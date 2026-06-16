@@ -138,6 +138,12 @@ DEFAULTS = {
     # *proactive* engine (M14) is a SEPARATE opt-in (assistant_proactive_*),
     # so this can default on: it only mirrors an existing local kanban board.
     "assistant_enabled": True,
+    # Agent backend (the external task board / agent the 비서 connects to).
+    # "auto" = Hermes if its kanban.db/CLI is present, else local-only; "local"
+    # = no external agent (clean local to-dos, the kanban section is hidden);
+    # "hermes" = force Hermes. OpenClaw/Pi/custom connectors come later — local
+    # is first-class so the assistant works with no agent installed at all.
+    "assistant_backend": "auto",
     # The ONLY Hermes contact points (read-only DB + CLI). Keys never here.
     "assistant_kanban_db_path": "~/.hermes/kanban.db",
     "hermes_bin": "~/.local/bin/hermes",
