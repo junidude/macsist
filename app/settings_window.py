@@ -50,7 +50,7 @@ from AppKit import (
     NSViewHeightSizable,
     NSViewWidthSizable,
 )
-from Foundation import NSMakeSize
+from Foundation import NSMakeSize, NSTimer
 from PyObjCTools import AppHelper
 
 import i18n
@@ -163,6 +163,7 @@ class SettingsPaneController(NSObject):
         self.language_popup = None
         self._language_codes = list(i18n.LANGUAGES)
         self.status_label = None
+        self._status_timer = None  # auto-clears the "저장됨 ✓" message
         # 모양 (M8): result-panel sizing + glass style
         self.panel_font_field = None
         self.panel_width_field = None
@@ -1011,6 +1012,21 @@ class SettingsPaneController(NSObject):
             entry.pop("_pending_key", None)
         self._updateKeyStatus()
 
+    def _scheduleStatusClear(self):
+        """Fade the status message after a few seconds so the NEXT save's
+        confirmation is a visible change (user-reported: it stayed forever)."""
+        if self._status_timer is not None:
+            self._status_timer.invalidate()
+        self._status_timer = (
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                2.5, self, "clearStatus:", None, False))
+
+    def clearStatus_(self, timer):
+        self._status_timer = None
+        if self.status_label is not None:
+            self.status_label.setTextColor_(NSColor.secondaryLabelColor())
+            self.status_label.setStringValue_("")
+
     def save_(self, sender):
         self._endRecording_(None)
         self._stashFields()
@@ -1079,6 +1095,7 @@ class SettingsPaneController(NSObject):
             self.on_saved()  # re-register hotkeys + rebuild the result panel
         self.status_label.setTextColor_(NSColor.systemGreenColor())
         self.status_label.setStringValue_(t("settings.saved"))
+        self._scheduleStatusClear()  # fade the confirmation after a few seconds
         active = self.config.active_provider()  # never log keys, only refs
         print(
             "settings saved:",
