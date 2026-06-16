@@ -554,3 +554,50 @@ result_panel) 최대 재사용. **모든 마일스톤은 Hermes 게이트웨이 
    `~/.ssh/config`에 IdentityFile 명시 또는 로그인 ssh-agent 상속 경로 확보 필요.
 
 이 셋은 M16 첫 커밋에서 `macsist doctor`의 원격 도달성 체크로 편입한다.
+
+---
+
+## 부록 A — M13~M15 as-built & 설계 진화 (2026-06-16)
+
+구현하며 사용자 피드백으로 §2~§7의 일부 결정이 바뀌었다. 아래가 **실제 출시된 동작**이며,
+충돌 시 이 부록이 우선한다.
+
+### A.1 에이전트 백엔드 = 선택형, 로컬 우선 (§2·§6.1 갱신)
+"Hermes = 상태 저장의 단일 진실원천" 가정을 완화했다. `assistant_backend`(`auto`|`local`|
+`hermes`, 기본 `auto`)로 백엔드를 고른다. **로컬이 1급 시민** — 외부 에이전트 없이도 할 일·
+제안·답변이 100% 동작한다. 백엔드가 `local`(또는 Hermes 부재)이면 비서 탭의 "칸반 작업"
+섹션을 숨기고 상태 줄을 "로컬 전용"으로 표시한다. `hermes_bridge.backend()/is_active()`.
+Settings 비서 카드에 백엔드 선택기. OpenClaw/Pi는 확장점만(미배선).
+
+### A.2 답변 라우팅 — Hermes가 "어려운 작업"을 추론한다 (§2 전제 변경)
+원안의 "**Hermes는 추론을 절대 안 한다**"는 폐기됐다. 비서 탭 입력 + **답변** 버튼은
+요청을 라우팅한다(`assistant_route_mode` = `auto`|`local`|`hermes`, 기본 `auto`):
+- 쉬움(짧고 비-agentic) → **로컬 M9 LLM** (explain 글래스 패널에 스트리밍, follow-up 재사용)
+- 어려움(>200자 또는 조사/검색/분석/코드/배포/research… 키워드) → **Hermes 에이전트**
+  (`hermes_bridge.run_agent` = `hermes chat -q`, 게이트웨이 불필요, codex 두뇌). 결과 패널에
+  "⚕ Hermes" 표기. Hermes CLI 부재 시 항상 로컬 폴백.
+- 부작용 있는 행동(메일 전송·원격 위임 등)은 여전히 제안→확인(§5). 답변은 부작용 없는
+  텍스트 생성이라 즉시 실행.
+- explain_controller.`_routeFor`/`answer_question`/`_runAnswerHermes`. Settings에 "답변 라우팅" 선택기.
+
+### A.3 비서 탭 = 인터랙티브 (M14 UI 확정)
+입력창 + 버튼 4개(**답변 / 제안 / 할 일 추가 / 스캔**) + **받은 작업함**(대기 제안 카드, 승인/
+건너뛰기 인라인) + **할 일**(작업 스레드, "작업 스레드"→"할 일"로 개명) + **칸반 작업**(연결 시).
+맨 위 Hermes 연결 상태 줄 + 흐름 안내 한 줄. `i18n.t()`는 키 누락 시 키 문자열로 폴백(크래시 방지).
+
+### A.4 창 외형 = explain 패널과 분리 (가독성)
+메인/Settings 창은 `window_glass_enabled`/`window_glass_style`/`window_tint_alpha`(기본 0.9 ≈
+불투명, 가독성)로 패널(`glass_*`)과 독립. Settings "창 모양" 섹션. 저장은 스크롤 보존 +
+초록 "저장됨 ✓"(2.5s 자동 소멸); 창 외형은 창 재오픈 시 적용(windowWillClose가 window=None).
+
+### A.5 M15 Telegram 전송 (출시, 단 이 망에서 미검증)
+자리 비움/조용 시간이면 제안을 `hermes send -t telegram`으로 전송(게이트웨이 불필요,
+best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegram_target`/
+`assistant_away_seconds`. `assistant/delivery.py`. **주의:** 이 머신에선 Telegram **봇 API가
+네트워크 차단**(루트 302, `/bot…/sendMessage` 15s 타임아웃 http=000)이라 실제 전송 미검증 —
+파이프는 올바르며 도달 가능한 망에서 `macsist tg "..."`로 검증할 것.
+
+### A.6 출시 마일스톤 상태
+- **M13·M14·M15 출시 (2026-06-16).** M16(원격 위임)의 일부(Hermes 답변 위임)는 A.2로 선반영됨.
+- 남은 것: M16 원격 Claude Code/Codex(SSH·tmux), M17 Gmail, M18 Calendar. Telegram 봇 API
+  도달성은 환경 의존(차단 시 네이티브 패널만 동작).
