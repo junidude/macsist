@@ -67,6 +67,25 @@ class HermesBridge:
             tasks = [t for t in tasks if t.get("tenant") == tenant]
         return tasks[:limit]
 
+    def status(self):
+        """Connection status for the 비서 tab header: is the board readable,
+        is the gateway running (Telegram/cron — M15+), how many tasks."""
+        db = self._db_path()
+        connected = db.exists() or _resolvable(self._hermes_bin())
+        gateway = "unknown"
+        gs = Path(os.path.expanduser("~/.hermes/gateway_state.json"))
+        try:
+            if gs.exists():
+                gateway = str(json.loads(gs.read_text(encoding="utf-8"))
+                              .get("gateway_state", "unknown"))
+        except (OSError, ValueError):
+            pass
+        return {
+            "connected": connected,
+            "gateway": gateway,
+            "board_count": len(self.board_tasks()) if connected else 0,
+        }
+
     def board_tasks(self, tenant=None, limit=200):
         """Tasks for the cockpit view — everything except archived/cancelled."""
         return [

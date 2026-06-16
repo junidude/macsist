@@ -838,6 +838,12 @@ class MainWindowController(NSObject):
             except Exception as exc:
                 print(f"assistant tab: inbox read error {exc!r}", flush=True)
         self._inbox = inbox
+        status = {}
+        if self.assistant_bridge is not None:
+            try:
+                status = self.assistant_bridge.status()
+            except Exception as exc:
+                print(f"assistant tab: status error {exc!r}", flush=True)
         doc = self.assistant_doc
         if doc is None:
             return
@@ -845,12 +851,20 @@ class MainWindowController(NSObject):
             sub.removeFromSuperview()
         width = self.assistant_scroll.contentSize().width
         inbox_h, th_h, task_h, gap = 100.0, 88.0, 76.0, 8.0
-        total = 8.0
+        total = 30.0
         total += 30 + (len(inbox) * (inbox_h + gap) if inbox else 26)
         total += 30 + (len(threads) * (th_h + gap) if threads else 26)
         total += 30 + (len(tasks) * (task_h + gap) if tasks else 26)
         doc.setFrameSize_(NSMakeSize(width, total))
         y = 4.0
+        conn = t("assistant.hermes_on") if status.get("connected") \
+            else t("assistant.hermes_off")
+        gw = t("assistant.gw_on") if status.get("gateway") == "running" \
+            else t("assistant.gw_off")
+        y = _assistant_empty(
+            doc, y, width,
+            f"⌁ {conn} · {gw} · {t('assistant.tasks_title')} "
+            f"{status.get('board_count', 0)}")
         y = _assistant_section(doc, y, width, t("menubar.assistant_inbox"))
         if inbox:
             for i in range(len(inbox)):
