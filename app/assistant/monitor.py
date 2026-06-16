@@ -94,3 +94,50 @@ class ProactiveMonitor:
                 self.engine.scan()
             except Exception as exc:  # never let the daemon thread die
                 print(f"proactive monitor: scan error {exc!r}", flush=True)
+
+
+class RemoteJobMonitor:
+    """Polls in-flight remote agent jobs (M16). Faster cadence while a job runs,
+    slow when idle. On completion, marshals on_done(job, result) to the main
+    thread. Always-running but cheap (no SSH when no job is running)."""
+
+    def __init__(self, config, executor, store, on_done=None):
+        self.config = config
+        self.executor = executor
+        self.store = store
+        self.on_done = on_done  # MAIN thread: (job, result_text)
+        self._wake = threading.Event()
+        self._thread = None
+
+    def start(self):
+        self._thread = threading.Thread(
+            target=self._loop, name="assistant-remote", daemon=True)
+        self._thread.start()
+        print("remote monitor started", flush=True)
+
+    def poke(self):
+        self._wake.set()
+
+    def _loop(self):
+        while True:
+            running = self.store.running()
+            interval = (float(self.config.get("remote_poll_interval"))
+                        if running
+                        else float(self.config.get("remote_poll_interval_idle")))
+            self._wake.wait(timeout=interval)
+            self._wake.clear()
+            for job in self.store.running():
+                try:
+                    st = self.executor.poll(job)
+                except Exception as exc:
+                    print(f"remote monitor: poll error {exc!r}", flush=True)
+                    continue
+                if st["status"] == "running":
+                    continue
+                result = self.executor.result(job)
+                self.store.update(job["id"], status=st["status"],
+                                 exit_code=st.get("exit_code"))
+                print(f"remote: {job['id']} -> {st['status']}", flush=True)
+                if self.on_done is not None:
+                    AppHelper.callAfter(
+                        self.on_done, self.store.get(job["id"]), result)

@@ -180,6 +180,17 @@ DEFAULTS = {
     # assistant hotkeys (single HotkeyManager — rebind only, never new listener)
     "hotkey_open_inbox": "<cmd>+<shift>+i",
     "hotkey_capture_task": "<cmd>+<shift>+t",
+    # ── M16 원격 위임 (SSH → tmux codex/claude on a remote dev box) ────────
+    "remote_enabled": False,                # opt-in (runs code on a remote)
+    # hosts the 비서 can delegate to; alias must exist in ~/.ssh/config.
+    "remote_hosts": [
+        {"alias": "nhn-container", "agent": "codex", "workspace": "scratch"},
+    ],
+    "remote_poll_interval": 20.0,           # in-flight job poll
+    "remote_poll_interval_idle": 60.0,      # poll when no job is running
+    "remote_max_runtime": 900,              # per-job `timeout` cap (seconds)
+    "remote_jobs_max": 200,
+    "hotkey_delegate_remote": "<cmd>+<shift>+d",  # (⌘⇧R taken by region)
 }
 
 

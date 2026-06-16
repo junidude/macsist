@@ -335,6 +335,16 @@ cmd_doctor() {
         echo "  · Hermes 추론 키 미설정 — 비서 두뇌는 Macsist 자체 LLM 사용(무관)"
     fi
 
+    echo "[원격 위임 (M16)]"
+    local RH
+    RH="$("$(pybin)" -c "import json,os; d=json.load(open(os.path.expanduser('$CONFIG_JSON'))); print((d.get('remote_hosts') or [{}])[0].get('alias',''))" 2>/dev/null)"
+    [[ -n "$RH" ]] || RH="nhn-container"
+    if ssh -o BatchMode=yes -o ConnectTimeout=8 "$RH" 'command -v codex tmux git >/dev/null 2>&1' 2>/dev/null; then
+        echo "  $C_OK 원격 '$RH' 도달 + codex/tmux/git 존재"
+    else
+        echo "  $C_WARN 원격 '$RH' 도달 불가/도구 없음 — ~/.ssh/config 의 IdentityFile 확인"
+    fi
+
     echo
     if [[ "$fails" == 0 ]]; then
         echo "모든 핵심 점검 통과 ✨"

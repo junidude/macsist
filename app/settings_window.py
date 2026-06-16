@@ -183,6 +183,7 @@ class SettingsPaneController(NSObject):
         self.assistant_backend_popup = None
         self.assistant_route_popup = None
         self.assistant_telegram_switch = None
+        self.assistant_remote_switch = None
         self.assistant_proactive_switch = None
         self.assistant_autonomy_popup = None
         self.assistant_interval_field = None
@@ -264,6 +265,9 @@ class SettingsPaneController(NSObject):
         )
         self.assistant_telegram_switch.setState_(
             1 if self.config.get("assistant_telegram_enabled") else 0
+        )
+        self.assistant_remote_switch.setState_(
+            1 if self.config.get("remote_enabled") else 0
         )
         self.assistant_proactive_switch.setState_(
             1 if self.config.get("assistant_proactive_enabled") else 0
@@ -657,9 +661,17 @@ class SettingsPaneController(NSObject):
             inner.addSubview_(switch)
             self.assistant_telegram_switch = switch
 
+        def build_remote(inner, row_y):
+            titled(inner, row_y, t("settings.remote_title"),
+                   t("settings.remote_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(
+                control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.assistant_remote_switch = switch
+
         card([(ROW_H, build_backend), (ROW_H, build_route),
               (ROW_H, build_proactive), (ROW_H, build_autonomy), interval_row,
-              (ROW_H, build_telegram)])
+              (ROW_H, build_telegram), (ROW_H, build_remote)])
         self.assistant_interval_field = interval_holder["field"]
 
         # ---- 단축키 ----
@@ -1107,6 +1119,8 @@ class SettingsPaneController(NSObject):
                         routes[ri] if 0 <= ri < len(routes) else "auto")
         self.config.set("assistant_telegram_enabled",
                         bool(self.assistant_telegram_switch.state()))
+        self.config.set("remote_enabled",
+                        bool(self.assistant_remote_switch.state()))
         self.config.set("assistant_proactive_enabled",
                         bool(self.assistant_proactive_switch.state()))
         self.config.set(

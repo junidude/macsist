@@ -59,6 +59,7 @@ class ProactiveEngine:
         self.client = LLMClient(config)
         self.on_proposal = on_proposal    # surface(proposal) — main thread
         self.on_executed = on_executed    # refresh(proposal) — main thread
+        self.on_remote_dispatch = None    # M16: set by controller; (prop)->ref
 
     # == discovery (worker thread OK) ========================================
 
@@ -105,6 +106,15 @@ class ProactiveEngine:
             if prop is not None:
                 created.append(prop)
         return created
+
+    def propose(self, kind, title, rationale, *, source="manual",
+                source_ref=None, payload=None):
+        """Public: create a proposal of `kind` (classified + gated like any
+        other). Used for explicit actions, e.g. remote delegation."""
+        return self._emit(
+            kind=kind, title=title, rationale=rationale, source=source,
+            source_ref=source_ref or f"{source}:{_now_iso()}",
+            payload=payload or {})
 
     # == emit + classify + dedup =============================================
 
@@ -218,7 +228,9 @@ class ProactiveEngine:
                 self.threads.add_activity(tid, "resume", "사용자가 재개")
                 self._open_links(self.threads.get(tid))
             return tid
-        # No M14 executor for this kind (reply_draft/remote_dispatch/send_*/…).
+        if kind == "remote_dispatch" and self.on_remote_dispatch is not None:
+            return self.on_remote_dispatch(prop)  # M16 — runs past assert_approved
+        # No executor for this kind yet (reply_draft/send_*/calendar_*/…).
         raise NotImplementedError(f"executor for kind '{kind}' arrives later")
 
     @staticmethod

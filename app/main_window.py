@@ -302,6 +302,7 @@ class MainWindowController(NSObject):
         self.on_assistant_skip = None
         self.on_assistant_snooze = None
         self.on_assistant_answer = None      # text -> explain.answer_question
+        self.on_assistant_remote = None      # text -> controller.delegate_remote
         self.on_assistant_propose = None     # text -> controller.handlePropose_
         self.on_assistant_new_thread = None  # text -> controller.new_thread
         self.on_assistant_scan = None        # -> controller.handleScan
@@ -767,6 +768,7 @@ class MainWindowController(NSObject):
         btn_w, btn_gap = 92.0, 8.0
         buttons = (
             (t("assistant.answer_btn"), "answerClicked:"),
+            (t("assistant.remote_btn"), "remoteClicked:"),
             (t("assistant.propose"), "proposeClicked:"),
             (t("assistant.new_thread"), "newThreadClicked:"),
             (t("assistant.scan"), "scanClicked:"),
@@ -802,6 +804,12 @@ class MainWindowController(NSObject):
         text = str(self.assistant_input.stringValue()).strip()
         if text and self.on_assistant_answer is not None:
             self.on_assistant_answer(text)
+            self.assistant_input.setStringValue_("")
+
+    def remoteClicked_(self, sender):
+        text = str(self.assistant_input.stringValue()).strip()
+        if text and self.on_assistant_remote is not None:
+            self.on_assistant_remote(text)
             self.assistant_input.setStringValue_("")
 
     def proposeClicked_(self, sender):
