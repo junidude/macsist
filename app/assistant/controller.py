@@ -12,6 +12,7 @@ import threading
 from PyObjCTools import AppHelper
 
 from assistant.audit_store import AuditStore
+from assistant.delivery import Deliverer
 from assistant.hermes_bridge import HermesBridge
 from assistant.monitor import AssistantMonitor, ProactiveMonitor
 from assistant.proactive import ProactiveEngine
@@ -39,6 +40,7 @@ class AssistantController:
             on_executed=self._proposalChanged,
         )
         self.proactive_monitor = ProactiveMonitor(config, self.engine)
+        self.deliverer = Deliverer(config)  # M15: Telegram (away/quiet hours)
         # lazy panel (built on first surface) — avoids touching AppKit if unused
         self._panel = None
         # let the window read the board + stores directly
@@ -85,12 +87,18 @@ class AssistantController:
         AppHelper.callAfter(self._refresh)
 
     def _surface(self, prop):
-        """Main thread: show the proposal in the floating panel + refresh."""
+        """Main thread: show the proposal in the floating panel + refresh, and
+        (M15) push to Telegram when the user is away / in quiet hours."""
         self._refresh()
         try:
             self._panel_controller().presentProposal_(prop)
         except Exception as exc:  # surfacing must never crash the loop
             print(f"assistant: panel present error {exc!r}", flush=True)
+        if self.deliverer.should_telegram():
+            text = f"🤖 [비서 제안] {prop.get('title') or ''}"
+            if prop.get("rationale"):
+                text += f"\n{prop['rationale']}"
+            self.deliverer.send_telegram(text)
 
     def _panel_controller(self):
         if self._panel is None:

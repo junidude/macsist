@@ -163,6 +163,12 @@ DEFAULTS = {
     "assistant_autonomy": "propose_only",
     "assistant_auto_safe_kinds": [],        # decision #8: everything via panel
     "assistant_quiet_hours": [22, 8],       # [start_h, end_h] — no nudges
+    # M15 Telegram delivery (via `hermes send`, no gateway needed). Off by
+    # default; used as the away / quiet-hours channel. Target "telegram" = the
+    # configured home channel; or "telegram:<chat_id>".
+    "assistant_telegram_enabled": False,
+    "assistant_telegram_target": "telegram",
+    "assistant_away_seconds": 120,          # idle ≥ this ⇒ "away" ⇒ Telegram
     "assistant_model": "",                  # "" => active explain provider
     # work threads
     "assistant_thread_poll_interval": 60.0,

@@ -182,6 +182,7 @@ class SettingsPaneController(NSObject):
         # 비서 (M14): proactive toggle + trust dial + interval
         self.assistant_backend_popup = None
         self.assistant_route_popup = None
+        self.assistant_telegram_switch = None
         self.assistant_proactive_switch = None
         self.assistant_autonomy_popup = None
         self.assistant_interval_field = None
@@ -260,6 +261,9 @@ class SettingsPaneController(NSObject):
         routes = ["auto", "local", "hermes"]
         self.assistant_route_popup.selectItemAtIndex_(
             routes.index(route) if route in routes else 0
+        )
+        self.assistant_telegram_switch.setState_(
+            1 if self.config.get("assistant_telegram_enabled") else 0
         )
         self.assistant_proactive_switch.setState_(
             1 if self.config.get("assistant_proactive_enabled") else 0
@@ -645,8 +649,17 @@ class SettingsPaneController(NSObject):
         interval_holder, interval_row = field_row(
             t("settings.assistant_interval_title"),
             t("settings.assistant_interval_desc"), w=120)
+        def build_telegram(inner, row_y):
+            titled(inner, row_y, t("settings.telegram_title"),
+                   t("settings.telegram_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(
+                control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.assistant_telegram_switch = switch
+
         card([(ROW_H, build_backend), (ROW_H, build_route),
-              (ROW_H, build_proactive), (ROW_H, build_autonomy), interval_row])
+              (ROW_H, build_proactive), (ROW_H, build_autonomy), interval_row,
+              (ROW_H, build_telegram)])
         self.assistant_interval_field = interval_holder["field"]
 
         # ---- 단축키 ----
@@ -1092,6 +1105,8 @@ class SettingsPaneController(NSObject):
         ri = self.assistant_route_popup.indexOfSelectedItem()
         self.config.set("assistant_route_mode",
                         routes[ri] if 0 <= ri < len(routes) else "auto")
+        self.config.set("assistant_telegram_enabled",
+                        bool(self.assistant_telegram_switch.state()))
         self.config.set("assistant_proactive_enabled",
                         bool(self.assistant_proactive_switch.state()))
         self.config.set(

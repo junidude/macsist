@@ -11,6 +11,7 @@
 #   macsist propose "<text>"   ask the assistant to consider a task (M14)
 #   macsist approve <id>       approve a pending proposal (M14)
 #   macsist scan               run one proactive cycle now (M14)
+#   macsist tg "<msg>"         send a test message to Telegram (M15)
 #   macsist doctor             full diagnosis (✓/✗ per check)
 #   macsist update             git pull + redeploy
 #
@@ -215,6 +216,14 @@ cmd_scan() {  # M14: run one proactive cycle now
     post_notification "com.macsist.assistant.scan"
 }
 
+cmd_tg() {  # M15: send a test message to Telegram via Hermes (no app/gateway needed)
+    local text="$*"
+    [[ -n "$text" ]] || { echo "사용법: macsist tg \"<메시지>\"" >&2; return 2; }
+    local HB="$HOME/.local/bin/hermes"
+    [[ -x "$HB" ]] || { echo "hermes CLI 없음 (~/.local/bin/hermes)" >&2; return 1; }
+    "$HB" send -t telegram "$text"
+}
+
 cmd_doctor() {
     load_cfg
     local fails=0
@@ -365,6 +374,7 @@ case "${1:-__default__}" in
     propose) shift; cmd_propose "$@" ;;
     approve) shift; cmd_approve "${1:-}" ;;
     scan)    cmd_scan ;;
+    tg)      shift; cmd_tg "$@" ;;
     doctor)  cmd_doctor ;;
     update)  cmd_update ;;
     help|-h|--help) usage ;;
