@@ -301,12 +301,13 @@ def main():
         panel.markDirty()  # panel size/font/glass apply on the next session
         new_lang = str(config.get("language"))
         if new_lang != i18n.current_language():
-            # M11 live language switch: menubar relabels synchronously; the
-            # window rebuild is deferred — the Save action lives inside the
-            # very hierarchy rebuildContent tears down.
+            # M11 live language switch: menubar relabels synchronously.
             i18n.set_language(new_lang)
             _controller.relabel()
-            AppHelper.callAfter(main_window.rebuildContent)
+        # Rebuild the window so 창 모양(glass/opacity) and any language change
+        # apply live. Deferred — the Save action lives inside the very hierarchy
+        # rebuildContent tears down.
+        AppHelper.callAfter(main_window.rebuildContent)
 
     main_window.settings.on_saved = _settings_saved
     main_window.settings.on_record_changed = _explain.pauseHotkeys_

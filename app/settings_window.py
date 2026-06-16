@@ -168,6 +168,9 @@ class SettingsPaneController(NSObject):
         self.panel_width_field = None
         self.panel_height_field = None
         self.glass_style_popup = None
+        # 창 모양 (메인/Settings 창 — 패널과 분리)
+        self.window_glass_switch = None
+        self.window_tint_field = None
         # 고급 (system prompts, sampling, follow-up, kwargs)
         self.prompt_views = {}  # config key -> NSTextView
         self.user_prompt_image_field = None
@@ -225,6 +228,12 @@ class SettingsPaneController(NSObject):
         keys = [k for k, _label_key in _GLASS_STYLE_ITEMS]
         self.glass_style_popup.selectItemAtIndex_(
             keys.index(style) if style in keys else 0
+        )
+        self.window_glass_switch.setState_(
+            1 if self.config.get("window_glass_enabled") else 0
+        )
+        self.window_tint_field.setStringValue_(
+            f"{float(self.config.get('window_tint_alpha')):g}"
         )
         for key, text_view in self.prompt_views.items():
             text_view.setString_(str(self.config.get(key)))
@@ -649,6 +658,23 @@ class SettingsPaneController(NSObject):
         self.panel_width_field = width_holder["field"]
         self.panel_height_field = height_holder["field"]
 
+        # ---- 창 모양 (메인/Settings 창 — explain 패널과 분리) ----
+        section(t("settings.section_window"))
+
+        def build_window_glass(inner, row_y):
+            titled(inner, row_y, t("settings.window_glass_title"),
+                   t("settings.window_glass_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(
+                control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.window_glass_switch = switch
+
+        opacity_holder, opacity_row = field_row(
+            t("settings.window_opacity_title"),
+            t("settings.window_opacity_desc"), w=120)
+        card([(ROW_H, build_window_glass), opacity_row])
+        self.window_tint_field = opacity_holder["field"]
+
         # ---- 고급 ----
         section(t("settings.section_advanced"))
         adv_rows = []
@@ -1015,6 +1041,14 @@ class SettingsPaneController(NSObject):
                             float(self.assistant_interval_field.stringValue()))
         except (ValueError, TypeError):
             pass  # keep the current interval on a bad value
+        # 창 모양
+        self.config.set("window_glass_enabled",
+                        bool(self.window_glass_switch.state()))
+        try:
+            alpha = float(self.window_tint_field.stringValue())
+            self.config.set("window_tint_alpha", max(0.0, min(1.0, alpha)))
+        except (ValueError, TypeError):
+            pass
         self.config.save()
         if self.on_saved is not None:
             self.on_saved()  # re-register hotkeys + rebuild the result panel

@@ -445,11 +445,12 @@ class MainWindowController(NSObject):
     # -- build -------------------------------------------------------------------
 
     def _glassStyle(self):
-        return _GLASS_STYLES.get(str(self.config.get("glass_style")), 1)
+        # window-specific (separate from the explain panel's glass_style)
+        return _GLASS_STYLES.get(str(self.config.get("window_glass_style")), 0)
 
     def _useGlass(self):
         return _GlassEffectView is not None and bool(
-            self.config.get("glass_enabled")
+            self.config.get("window_glass_enabled")
         )
 
     def _buildWindow(self):
@@ -515,7 +516,7 @@ class MainWindowController(NSObject):
         # transparent outside the rounded sheet.
         self.window.setOpaque_(False)
         self.window.setBackgroundColor_(NSColor.clearColor())
-        tint_alpha = float(self.config.get("glass_window_tint_alpha"))
+        tint_alpha = float(self.config.get("window_tint_alpha"))
         if use_glass:
             body = _GlassEffectView.alloc().initWithFrame_(
                 NSMakeRect(0, 0, width, total_h)

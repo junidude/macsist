@@ -109,6 +109,13 @@ DEFAULTS = {
     "glass_style": "regular",
     # History 창 본체 glass 위에 깔리는 배경 틴트의 불투명도 (0=완전 클리어)
     "glass_window_tint_alpha": 0.5,
+    # 메인/Settings 창 외형 — explain 패널과 분리(사용자 피드백): 패널은 커서
+    # 위 떠다니는 작은 글래스라 투명해도 되지만, 본체 창은 글이 읽혀야 한다.
+    # 기본은 거의 불투명(0.9)해 데스크톱이 비쳐 가독성을 해치지 않게 한다.
+    "window_glass_enabled": True,
+    "window_glass_style": "regular",        # regular(프로스트) | clear
+    "window_tint_alpha": 0.9,               # 0=완전 투명 … 1=불투명
+
     # Spotlight/제어 센터급 큰 둥근 모서리 (사용자 피드백, M8 폴리시)
     "panel_corner_radius": 26.0,
     "panel_fade_duration": 0.15,
