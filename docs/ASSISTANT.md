@@ -598,6 +598,12 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
 파이프는 올바르며 도달 가능한 망에서 `macsist tg "..."`로 검증할 것.
 
 ### A.6 출시 마일스톤 상태
-- **M13·M14·M15 출시 (2026-06-16).** M16(원격 위임)의 일부(Hermes 답변 위임)는 A.2로 선반영됨.
-- 남은 것: M16 원격 Claude Code/Codex(SSH·tmux), M17 Gmail, M18 Calendar. Telegram 봇 API
-  도달성은 환경 의존(차단 시 네이티브 패널만 동작).
+- **M13·M14·M15·M16 출시 (2026-06-16).**
+- **M16 원격 위임**: `remote_exec.py`로 nhn-container에 `codex exec`를 detached tmux로
+  디스패치(prompt stdin, `-o result.txt`, exit_code 센티넬), `RemoteJobMonitor`가 폴링,
+  완료 시 결과를 할 일 스레드로 + away면 Telegram. SSH는 `~/.ssh/config` IdentityFile(ssh-agent
+  불필요). 검증: dispatch→poll→result "REMOTE_OK"(exit 0). risk=confirm 게이트 경유.
+  MVP=호스트1/codex/scratch+`--skip-git-repo-check`; later=디스패치별 git worktree(default_repo),
+  라이브 tail, 멀티호스트, claude-code. (A.2의 "Hermes 답변 위임"은 codex@ChatGPT-백엔드로
+  로컬 실행 — 원격 파일 접근 없음; M16은 nhn-container의 실제 파일/repo에서 실행 — 별개 경로.)
+- 남은 것: M17 Gmail, M18 Calendar. Telegram 봇 API 도달성은 환경 의존(차단 시 네이티브만).
