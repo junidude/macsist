@@ -484,10 +484,14 @@ result_panel) 최대 재사용. **모든 마일스톤은 Hermes 게이트웨이 
 - **검수:** 위임 승인 → 설정 호스트에서 `claude` 실행 → transcript 작업 탭에 tail → 완료 Telegram.
 - **MVP=호스트1+claude-code.** later: Codex, 라이브 tail, 멀티호스트, AWS-SSM ProxyCommand.
 
-### M17 — Gmail (~1주, Keychain 게이트)
+### M17 — Gmail (~1주, Keychain 게이트) — ✅ 출시 (2026-06-17)
 - **목표:** 처리 필요한 메일이 준비된 초안 + 폰 nudge로 표면.
-- **출시:** §6.4 MVP cut.
-- **검수:** §6.4. later: 원클릭 전송, Telegram 회신, 멀티계정.
+- **출시:** §6.4 MVP cut — `gmail_oauth.py`/`gmail_client.py`/`gmail_triage.py`/`gmail_monitor.py`,
+  proactive `reply_draft`/`send_reply` executor(컨트롤러 워커 디스패치, 메인 비차단), ProposalPanel
+  "지금 보내기" 2단계 제스처, Settings "Gmail" 카드 + OAuth 연결 버튼, `macsist gmail`/doctor, i18n×6.
+- **검수:** 임포트/구성·트리아지 enrich·MIME 헤더·GmailState 라운드트립·GUI 빌드(Settings 카드
+  렌더, 크래시 0)·CLI 모두 통과. **실제 받은편지함 E2E는 GCP 클라이언트 JSON 주입 후** (현재 빈 파일
+  → doctor 경고). later: 원클릭 전송, Telegram 회신, 멀티계정.
 
 ### M18 — Calendar (ICS) (~1주)
 - **목표:** TimeTree+Google 통합 + "N분 후 일정" 깨우기.
@@ -598,7 +602,7 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
 파이프는 올바르며 도달 가능한 망에서 `macsist tg "..."`로 검증할 것.
 
 ### A.6 출시 마일스톤 상태
-- **M13·M14·M15·M16 출시 (2026-06-16).**
+- **M13·M14·M15·M16 출시 (2026-06-16). M17 Gmail 출시 (2026-06-17).**
 - **M16 원격 위임**: `remote_exec.py`로 nhn-container에 `codex exec`를 detached tmux로
   디스패치(prompt stdin, `-o result.txt`, exit_code 센티넬), `RemoteJobMonitor`가 폴링,
   완료 시 결과를 할 일 스레드로 + away면 Telegram. SSH는 `~/.ssh/config` IdentityFile(ssh-agent
@@ -606,4 +610,15 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
   MVP=호스트1/codex/scratch+`--skip-git-repo-check`; later=디스패치별 git worktree(default_repo),
   라이브 tail, 멀티호스트, claude-code. (A.2의 "Hermes 답변 위임"은 codex@ChatGPT-백엔드로
   로컬 실행 — 원격 파일 접근 없음; M16은 nhn-container의 실제 파일/repo에서 실행 — 별개 경로.)
-- 남은 것: M17 Gmail, M18 Calendar. Telegram 봇 API 도달성은 환경 의존(차단 시 네이티브만).
+- **M17 Gmail**: 수집·트리아지·초안 전부 인프로세스(`gmail_oauth.py` 루프백-PKCE → Keychain
+  `gmail.oauth.refresh`/`.client`, `gmail_client.py` httpx REST: `history.list` 증분 + 404→
+  `messages.list` resync + `drafts.create`/`drafts.send`, `gmail_triage.py` 헤더+snippet 다이제스트
+  → LLM이 답장 필요한 1~2건 골라 초안, `gmail_monitor.py` health 클론(기본 OFF) +
+  `assistant_gmail_state.json` 커서). **2단계 전송**: reply_draft 승인(confirm)→실제 DRAFT 생성
+  →send_reply 카드(never_auto) "지금 보내기" 제스처만 `drafts.send`. 초안/전송 네트워크는 컨트롤러
+  워커 스레드(메인 비차단). 트리아지는 active provider(결정: `gmail_force_local_llm=False` 기본).
+  Settings "Gmail" 카드(연결 버튼/상태/주기/필터), `macsist gmail status|connect|sync`, doctor
+  Gmail 점검. **GCP Desktop OAuth 클라이언트 JSON은 사용자 제공**(`tokens_and_keys/gcp-gmail-api.key`,
+  git-ignored); 비어 있으면 doctor가 경고 — 실제 받은편지함 E2E 검증은 키 주입 후. later: 원클릭
+  전송, Telegram 회신, 멀티계정.
+- 남은 것: M18 Calendar. Telegram 봇 API 도달성은 환경 의존(차단 시 네이티브만).

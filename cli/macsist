@@ -216,6 +216,24 @@ cmd_scan() {  # M14: run one proactive cycle now
     post_notification "com.macsist.assistant.scan"
 }
 
+cmd_gmail() {  # M17: Gmail status / connect / sync
+    local sub="${1:-status}"
+    case "$sub" in
+        status)
+            "$(pybin)" "$CONFIGURE" gmail-status \
+                || { echo "Gmail 상태를 읽을 수 없습니다"; return 1; } ;;
+        connect)  # ask the running app to run the OAuth flow (browser consent)
+            agent_loaded "$APP_LABEL" \
+                || { echo "앱이 실행 중이 아닙니다 — macsist start app" >&2; return 1; }
+            post_notification "com.macsist.assistant.gmailConnect"
+            echo "브라우저에서 Google 동의를 완료하세요 (앱이 처리)." ;;
+        sync)
+            post_notification "com.macsist.assistant.gmailSync"
+            echo "Gmail 폴링을 한 번 실행했습니다." ;;
+        *) echo "사용법: macsist gmail status|connect|sync" >&2; return 2 ;;
+    esac
+}
+
 cmd_tg() {  # M15: send a test message to Telegram via Hermes (no app/gateway needed)
     local text="$*"
     [[ -n "$text" ]] || { echo "사용법: macsist tg \"<메시지>\"" >&2; return 2; }
@@ -345,6 +363,24 @@ cmd_doctor() {
         echo "  $C_WARN 원격 '$RH' 도달 불가/도구 없음 — ~/.ssh/config 의 IdentityFile 확인"
     fi
 
+    echo "[Gmail (M17)]"
+    local GM_ON GM_CJSON
+    GM_ON="$("$(pybin)" -c "import json,os; d=json.load(open(os.path.expanduser('$CONFIG_JSON'))); print(1 if d.get('gmail_enabled') else 0)" 2>/dev/null)"
+    GM_CJSON="$("$(pybin)" -c "import json,os; d=json.load(open(os.path.expanduser('$CONFIG_JSON'))); print(os.path.expanduser(d.get('gmail_client_json_path','')))" 2>/dev/null)"
+    [[ -z "$GM_CJSON" ]] && GM_CJSON="$HOME/Documents/macsist/tokens_and_keys/gcp-gmail-api.key"
+    if security find-generic-password -s com.macsist -a gmail.oauth.refresh -w >/dev/null 2>&1; then
+        echo "  $C_OK Gmail 연결됨 (Keychain refresh token 존재)"
+    else
+        echo "  $C_WARN Gmail 미연결 — Settings → Gmail 연결 (또는 macsist gmail connect)"
+    fi
+    if [[ -s "$GM_CJSON" ]]; then
+        echo "  $C_OK GCP 클라이언트 JSON 존재 ($GM_CJSON)"
+    else
+        echo "  $C_WARN GCP 클라이언트 JSON 비어있음/없음 ($GM_CJSON) — Desktop OAuth 클라이언트 JSON을 넣으세요"
+    fi
+    [[ "$GM_ON" == 1 ]] && echo "  · gmail_enabled=on (폴링 활성)" \
+                        || echo "  · gmail_enabled=off (Settings에서 켜기)"
+
     echo
     if [[ "$fails" == 0 ]]; then
         echo "모든 핵심 점검 통과 ✨"
@@ -384,6 +420,7 @@ case "${1:-__default__}" in
     propose) shift; cmd_propose "$@" ;;
     approve) shift; cmd_approve "${1:-}" ;;
     scan)    cmd_scan ;;
+    gmail)   shift; cmd_gmail "$@" ;;
     tg)      shift; cmd_tg "$@" ;;
     doctor)  cmd_doctor ;;
     update)  cmd_update ;;

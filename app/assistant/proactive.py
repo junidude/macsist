@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 from assistant import risk
 from assistant.audit_store import NotApproved
+from assistant.gmail_triage import GmailExecutor
 from assistant.thread_store import ThreadStore
 from llm_client import LLMClient, LLMError, StreamHandle
 
@@ -57,9 +58,12 @@ class ProactiveEngine:
         self.threads = threads
         self.audit = audit
         self.client = LLMClient(config)
+        self.gmail = GmailExecutor(config)  # M17: draft/send (past assert_approved)
         self.on_proposal = on_proposal    # surface(proposal) — main thread
         self.on_executed = on_executed    # refresh(proposal) — main thread
         self.on_remote_dispatch = None    # M16: set by controller; (prop)->ref
+        self.on_gmail_draft = None        # M17: set by controller; (prop)->ref
+        self.on_gmail_send = None         # M17: set by controller; (prop)->ref
 
     # == discovery (worker thread OK) ========================================
 
@@ -115,6 +119,32 @@ class ProactiveEngine:
             kind=kind, title=title, rationale=rationale, source=source,
             source_ref=source_ref or f"{source}:{_now_iso()}",
             payload=payload or {})
+
+    def triage_to_proposals(self, picks):
+        """M17: turn GmailTriager picks into reply_draft proposals (one per
+        thread; deduped by thread id). Called on the main thread by the
+        controller after triage runs on a worker thread. Returns the created
+        proposals (surfaced individually via on_proposal)."""
+        created = []
+        for pick in picks or []:
+            tid = str(pick.get("thread_id") or pick.get("msg_id") or "")
+            prop = self._emit(
+                kind="reply_draft",
+                title=str(pick.get("title") or "메일 답장 초안")[:200],
+                rationale=str(pick.get("rationale") or ""),
+                source="gmail",
+                source_ref=f"gmail:{tid}",
+                payload={"action": "create_draft", "args": {
+                    "to": pick.get("to", ""),
+                    "subject": pick.get("subject", ""),
+                    "draft": pick.get("draft", ""),
+                    "thread_id": pick.get("thread_id"),
+                    "in_reply_to": pick.get("in_reply_to"),
+                }},
+            )
+            if prop is not None:
+                created.append(prop)
+        return created
 
     # == emit + classify + dedup =============================================
 
@@ -230,8 +260,41 @@ class ProactiveEngine:
             return tid
         if kind == "remote_dispatch" and self.on_remote_dispatch is not None:
             return self.on_remote_dispatch(prop)  # M16 — runs past assert_approved
-        # No executor for this kind yet (reply_draft/send_*/calendar_*/…).
+        if kind == "reply_draft":
+            # M17 step 1: create a reversible Gmail DRAFT. The network call runs
+            # off the main thread (controller hook); the send_reply follow-up is
+            # emitted when the draft id comes back (controller -> emit_send_reply).
+            if self.on_gmail_draft is not None:
+                return self.on_gmail_draft(prop)            # -> "drafting"
+            draft_id = self.gmail.create_draft(payload.get("args") or {})
+            self.emit_send_reply(prop, draft_id)            # headless fallback
+            return draft_id
+        if kind == "send_reply":
+            # M17 step 2: only ever reached via a user gesture on the send card
+            # (never_auto) → assert_approved already passed in execute().
+            if self.on_gmail_send is not None:
+                return self.on_gmail_send(prop)             # -> "sending"
+            return self.gmail.send_draft(payload.get("args") or {})
+        # No executor for this kind yet (calendar_*/…).
         raise NotImplementedError(f"executor for kind '{kind}' arrives later")
+
+    def emit_send_reply(self, reply_prop, draft_id):
+        """Follow-up to a created draft: a never_auto send_reply proposal whose
+        approval IS the explicit "지금 보내기" gesture. Carries the draft id so the
+        executor sends exactly that (Gmail-side edits update the same draft)."""
+        args = (reply_prop.get("payload") or {}).get("args") or {}
+        self._emit(
+            kind="send_reply",
+            title=f"지금 보내기: {reply_prop.get('title', '')}"[:200],
+            rationale="초안이 생성되었습니다. 검토 후 보내세요. (Gmail에서 수정 가능)",
+            source="gmail",
+            source_ref=f"send:{draft_id}",
+            payload={"action": "send_draft", "args": {
+                "draft_id": draft_id,
+                "to": args.get("to", ""),
+                "subject": args.get("subject", ""),
+            }},
+        )
 
     @staticmethod
     def _open_links(thread):

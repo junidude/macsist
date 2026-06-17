@@ -187,6 +187,11 @@ class SettingsPaneController(NSObject):
         self.assistant_proactive_switch = None
         self.assistant_autonomy_popup = None
         self.assistant_interval_field = None
+        # Gmail (M17): enable + connect status + poll interval + search filter
+        self.gmail_enabled_switch = None
+        self.gmail_status_label = None
+        self.gmail_interval_field = None
+        self.gmail_filter_field = None
         self.on_saved = None  # set by main.py: hotkey reload + panel rebuild
         self.on_record_changed = None  # set by main.py: pause hotkeys while recording
         self._hotkey_bindings = {}  # config key -> pynput format, saved on Save
@@ -278,6 +283,16 @@ class SettingsPaneController(NSObject):
         self.assistant_interval_field.setStringValue_(
             f"{float(self.config.get('assistant_proactive_interval')):g}"
         )
+        self.gmail_enabled_switch.setState_(
+            1 if self.config.get("gmail_enabled") else 0
+        )
+        self.gmail_interval_field.setStringValue_(
+            f"{float(self.config.get('gmail_poll_interval')):g}"
+        )
+        self.gmail_filter_field.setStringValue_(
+            str(self.config.get("gmail_query_filter"))
+        )
+        self._refreshGmailStatus()
         self.status_label.setTextColor_(NSColor.secondaryLabelColor())
         self.status_label.setStringValue_("")
         print("settings pane refreshed", flush=True)
@@ -379,6 +394,45 @@ class SettingsPaneController(NSObject):
 
     def fetchModels_(self, sender):
         self._refreshModelList()
+
+    # -- Gmail OAuth (M17) ------------------------------------------------------
+
+    def connectGmail_(self, sender):
+        self.gmail_status_label.setTextColor_(NSColor.secondaryLabelColor())
+        self.gmail_status_label.setStringValue_(t("settings.gmail_connecting"))
+        threading.Thread(target=self._gmailConnectWorker, daemon=True,
+                        name="settings-gmail-oauth").start()
+
+    def _gmailConnectWorker(self):
+        from assistant import gmail_oauth
+        try:
+            addr = gmail_oauth.connect(self.config)
+            ok, msg = True, (addr or t("settings.gmail_connected"))
+        except Exception as exc:  # GmailAuthError / KeychainError / transport
+            ok, msg = False, f"{t('settings.gmail_connect_failed')}: {exc}"
+        AppHelper.callAfter(self._gmailConnectDone_msg_, ok, msg)
+
+    def _gmailConnectDone_msg_(self, ok, msg):
+        self.gmail_status_label.setStringValue_(str(msg)[:80])
+        self.gmail_status_label.setTextColor_(
+            NSColor.systemGreenColor() if ok else NSColor.systemRedColor())
+
+    def _refreshGmailStatus(self):
+        from assistant import gmail_oauth
+        try:
+            connected = gmail_oauth.is_connected()
+        except Exception:
+            connected = False
+        if connected:
+            acct = str(self.config.get("gmail_account") or "").strip()
+            self.gmail_status_label.setStringValue_(
+                acct or t("settings.gmail_connected"))
+            self.gmail_status_label.setTextColor_(NSColor.systemGreenColor())
+        else:
+            self.gmail_status_label.setStringValue_(
+                t("settings.gmail_not_connected"))
+            self.gmail_status_label.setTextColor_(
+                NSColor.secondaryLabelColor())
 
     # -- build (Codex-style sections + cards) -----------------------------------
 
@@ -673,6 +727,37 @@ class SettingsPaneController(NSObject):
               (ROW_H, build_proactive), (ROW_H, build_autonomy), interval_row,
               (ROW_H, build_telegram), (ROW_H, build_remote)])
         self.assistant_interval_field = interval_holder["field"]
+
+        # ---- Gmail (M17) ----
+        section(t("settings.section_gmail"))
+
+        def build_gmail_enable(inner, row_y):
+            titled(inner, row_y, t("settings.gmail_title"),
+                   t("settings.gmail_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(
+                control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.gmail_enabled_switch = switch
+
+        def build_gmail_connect(inner, row_y):
+            # the desc sub-label is repurposed as the connection status line
+            # (M9 key-row pattern); the pill kicks off the loopback OAuth flow.
+            self.gmail_status_label = titled(
+                inner, row_y, t("settings.gmail_connect_title"),
+                t("settings.gmail_connect_desc"))
+            inner.addSubview_(make_pill(
+                t("settings.gmail_connect"), self, "connectGmail:",
+                control_frame(row_y, 130, 30)))
+
+        gmail_interval_holder, gmail_interval_row = field_row(
+            t("settings.gmail_interval_title"),
+            t("settings.gmail_interval_desc"), w=120)
+        gmail_filter_holder, gmail_filter_row = input_row(
+            t("settings.gmail_filter_title"), t("settings.gmail_filter_desc"))
+        card([(ROW_H, build_gmail_enable), (ROW_H, build_gmail_connect),
+              gmail_interval_row, gmail_filter_row])
+        self.gmail_interval_field = gmail_interval_holder["field"]
+        self.gmail_filter_field = gmail_filter_holder["field"]
 
         # ---- 단축키 ----
         section(t("settings.section_hotkeys"))
@@ -1132,6 +1217,17 @@ class SettingsPaneController(NSObject):
                             float(self.assistant_interval_field.stringValue()))
         except (ValueError, TypeError):
             pass  # keep the current interval on a bad value
+        # Gmail (M17)
+        self.config.set("gmail_enabled",
+                        bool(self.gmail_enabled_switch.state()))
+        try:
+            self.config.set("gmail_poll_interval",
+                            float(self.gmail_interval_field.stringValue()))
+        except (ValueError, TypeError):
+            pass
+        gfilter = str(self.gmail_filter_field.stringValue()).strip()
+        if gfilter:
+            self.config.set("gmail_query_filter", gfilter)
         # 창 모양
         self.config.set("window_glass_enabled",
                         bool(self.window_glass_switch.state()))

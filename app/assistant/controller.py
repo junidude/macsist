@@ -19,6 +19,8 @@ from assistant.monitor import (
     ProactiveMonitor,
     RemoteJobMonitor,
 )
+from assistant.gmail_monitor import GmailMonitor
+from assistant.gmail_triage import GmailTriager
 from assistant.proactive import ProactiveEngine
 from assistant.proposal_store import ProposalStore
 from assistant.remote_exec import RemoteAgentExecutor, RemoteJobStore
@@ -53,6 +55,12 @@ class AssistantController:
             config, self.remote, self.remote_jobs, on_done=self._onRemoteDone)
         self.engine.on_remote_dispatch = self._dispatchRemote
         main_window.on_assistant_remote = self.delegate_remote
+        # M17: Gmail — poll inbox → triage → reply_draft proposals (OFF by default)
+        self.gmail_triager = GmailTriager(config)
+        self.gmail_monitor = GmailMonitor(config, on_gmail=self._onGmail)
+        # the draft/send network calls run off the main thread (panel click)
+        self.engine.on_gmail_draft = self._draftGmail
+        self.engine.on_gmail_send = self._sendGmail
         # lazy panel (built on first surface) — avoids touching AppKit if unused
         self._panel = None
         # let the window read the board + stores directly
@@ -71,6 +79,7 @@ class AssistantController:
         self.kanban_monitor.start()
         self.proactive_monitor.start()
         self.remote_monitor.start()
+        self.gmail_monitor.start()
         self._refresh()
 
     # == board / badge (main thread) =========================================
@@ -224,6 +233,99 @@ class AssistantController:
             self.deliverer.send_telegram(
                 f"🤖 [원격 {mark}] {job.get('prompt', '')[:60]}\n"
                 f"{(result or '')[:500]}")
+
+    # == Gmail (M17) =========================================================
+
+    def _onGmail(self, metas):
+        """Main thread: a batch of new messages arrived — triage on a worker
+        thread (LLM I/O) so the poll callback never blocks the main thread."""
+        threading.Thread(target=self._triageWorker, args=(metas,),
+                        daemon=True, name="gmail-triage").start()
+
+    def _triageWorker(self, metas):
+        try:
+            picks = self.gmail_triager.triage(metas)
+        except Exception as exc:  # triage must never crash the daemon
+            print(f"gmail: triage error {exc!r}", flush=True)
+            return
+        AppHelper.callAfter(self._gmailProposals, picks)
+
+    def _gmailProposals(self, picks):
+        """Main thread: create reply_draft proposals (each surfaces via the
+        panel + Telegram-when-away, like any other proposal)."""
+        if picks:
+            self.engine.triage_to_proposals(picks)
+        self._refresh()
+
+    def _draftGmail(self, prop):
+        """Engine hook (past assert_approved): create the Gmail DRAFT on a worker
+        thread so the panel-approve click never blocks on the network."""
+        args = (prop.get("payload") or {}).get("args") or {}
+        threading.Thread(target=self._draftWorker, args=(prop, args),
+                        daemon=True, name="gmail-draft").start()
+        return "drafting"
+
+    def _draftWorker(self, prop, args):
+        draft_id = err = None
+        try:
+            draft_id = self.engine.gmail.create_draft(args)
+        except Exception as exc:
+            err = str(exc)
+        AppHelper.callAfter(self._draftDone, prop, draft_id, err)
+
+    def _draftDone(self, prop, draft_id, err):
+        if err or not draft_id:
+            self.proposals.mark_decided(prop["id"], "failed",
+                                        error=err or "draft 생성 실패")
+        else:
+            # carry the real draft id + surface the 2nd-gesture send card
+            self.proposals.update(prop["id"], result_ref=draft_id)
+            self.engine.emit_send_reply(prop, draft_id)
+        self._refresh()
+
+    def _sendGmail(self, prop):
+        """Engine hook (past assert_approved, never_auto): send the DRAFT on a
+        worker thread. Only ever reached via the explicit '지금 보내기' gesture."""
+        args = (prop.get("payload") or {}).get("args") or {}
+        threading.Thread(target=self._sendWorker, args=(prop, args),
+                        daemon=True, name="gmail-send").start()
+        return "sending"
+
+    def _sendWorker(self, prop, args):
+        sent_id = err = None
+        try:
+            sent_id = self.engine.gmail.send_draft(args)
+        except Exception as exc:
+            err = str(exc)
+        AppHelper.callAfter(self._sendDone, prop, sent_id, err)
+
+    def _sendDone(self, prop, sent_id, err):
+        if err or not sent_id:
+            self.proposals.mark_decided(prop["id"], "failed",
+                                        error=err or "전송 실패")
+        else:
+            self.proposals.update(prop["id"], result_ref=sent_id)
+            print(f"gmail: sent {sent_id}", flush=True)
+        self._refresh()
+
+    def syncGmail(self):
+        """`macsist gmail sync`: run one inbox poll now."""
+        self.gmail_monitor.poke()
+
+    def connectGmail(self):
+        """`macsist gmail connect`: run the OAuth flow on a worker thread (it
+        opens a browser + blocks on the loopback redirect)."""
+        threading.Thread(target=self._gmailConnectWorker, daemon=True,
+                        name="gmail-oauth").start()
+
+    def _gmailConnectWorker(self):
+        from assistant import gmail_oauth
+        try:
+            addr = gmail_oauth.connect(self.config)
+            print(f"gmail: connected ({addr})", flush=True)
+        except Exception as exc:
+            print(f"gmail: connect failed {exc!r}", flush=True)
+        AppHelper.callAfter(self._refresh)
 
     def showInbox(self):
         self.main_window.showAssistant()

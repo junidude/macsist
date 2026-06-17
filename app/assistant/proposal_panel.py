@@ -194,8 +194,13 @@ class ProposalPanelController(NSObject):
         bw = (iw - 16) / 3.0
         accent = NSColor.controlAccentColor()
         subtle = NSColor.labelColor().colorWithAlphaComponent_(0.10)
+        # M17: the 2nd-gesture send card relabels 승인 → 지금 보내기 (the explicit
+        # send), while the badge stays NEVER_AUTO red (set above from prop.risk).
+        approve_label = (t("assistant.send_now")
+                         if str(prop.get("kind")) == "send_reply"
+                         else t("assistant.approve"))
         self.host.addSubview_(_pill(
-            self, t("assistant.approve"), "approveClicked:",
+            self, approve_label, "approveClicked:",
             _PAD, 18, bw, 34, accent, NSColor.whiteColor()))
         self.host.addSubview_(_pill(
             self, t("assistant.skip"), "skipClicked:",

@@ -191,6 +191,38 @@ DEFAULTS = {
     "remote_max_runtime": 900,              # per-job `timeout` cap (seconds)
     "remote_jobs_max": 200,
     "hotkey_delegate_remote": "<cmd>+<shift>+d",  # (⌘⇧R taken by region)
+    # ── M17 Gmail (REST + Keychain OAuth; collection/triage/draft all in-app) ─
+    "gmail_enabled": False,                 # opt-in poller (OFF by default)
+    "gmail_poll_interval": 300.0,           # seconds between inbox polls
+    # Gmail search filter for what counts as "needs a look" (resync path)
+    "gmail_query_filter": ("is:unread newer_than:2d "
+                           "-category:promotions -category:social"),
+    "gmail_account": "",                    # the address being watched (display)
+    "gmail_max_triage_per_poll": 15,        # cap messages digested per poll
+    "assistant_digest_max_chars": 6000,     # cap on any LLM digest (triage etc.)
+    # send is ALWAYS a user gesture; this only governs the one-click affordance,
+    # never an auto path (send_reply stays never_auto in risk.py regardless).
+    "gmail_one_click_send": False,
+    # decision (M17): triage uses the active provider (NOT forced local). Flip to
+    # True to force the local MLX server so mail content never leaves the machine.
+    "gmail_force_local_llm": False,
+    # GCP desktop OAuth client JSON (git-ignored); read once at "연결" time, then
+    # client_id/secret live in the Keychain (gmail.oauth.client) — never config.
+    "gmail_client_json_path":
+        "~/Documents/macsist/tokens_and_keys/gcp-gmail-api.key",
+    # Triage prompts (single default; the model is told to reply in the email's
+    # own language). Tunable like every other prompt — hard rule: no hardcoding.
+    "gmail_triage_system": (
+        "너는 사용자의 받은 편지함을 분류하는 비서다. 아래 메일 목록(보낸이/제목/"
+        "미리보기)을 보고, 사용자가 '직접 답장해야 하는' 메일을 최대 2건만 고른다. "
+        "광고/뉴스레터/자동알림/단순공지는 절대 고르지 마라. 고른 각 메일에 대해 "
+        "정중하고 간결한 답장 초안을 메일과 같은 언어로 작성한다. 반드시 JSON "
+        "배열만 출력하고 다른 말은 쓰지 마라. 각 항목은 "
+        "{\"msg_id\": \"...\", \"title\": \"한 줄 요약\", "
+        "\"rationale\": \"왜 답장이 필요한지 한 문장\", "
+        "\"draft\": \"답장 본문\"} 형식이다. 답장할 메일이 없으면 []."
+    ),
+    "gmail_triage_user": "받은 편지함:\n<<DIGEST>>",
 }
 
 

@@ -101,6 +101,16 @@ class _RemoteCommandRelay(NSObject):
         if self._assistant is not None:
             self._assistant.showInbox()
 
+    def remoteAssistantGmailConnect_(self, note):
+        print("remote: assistant.gmailConnect", flush=True)
+        if self._assistant is not None:
+            self._assistant.connectGmail()
+
+    def remoteAssistantGmailSync_(self, note):
+        print("remote: assistant.gmailSync", flush=True)
+        if self._assistant is not None:
+            self._assistant.syncGmail()
+
 
 class _UIAuditor(NSObject):
     """HE_DEBUG_UI_AUDIT=<sec>: repeating structured dump of the panel and
@@ -338,6 +348,8 @@ def main():
         ("approve", "remoteAssistantApprove:"),
         ("scan", "remoteAssistantScan:"),
         ("inbox", "remoteAssistantInbox:"),
+        ("gmailConnect", "remoteAssistantGmailConnect:"),
+        ("gmailSync", "remoteAssistantGmailSync:"),
     ):
         dist_center.addObserver_selector_name_object_(
             _remote_relay, _sel, f"com.macsist.assistant.{_name}", None

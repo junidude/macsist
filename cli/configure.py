@@ -235,6 +235,26 @@ def cmd_inbox(args):
     return 0
 
 
+def cmd_gmail_status(args):
+    """M17: Gmail connection summary (Keychain refresh-token presence + config).
+    Stdlib + keychain only — never imports gmail_oauth (which needs httpx)."""
+    try:
+        store = ConfigStore()
+    except Exception as exc:
+        return _emit({"error": str(exc)}, ok=False)
+    try:
+        connected = bool(keychain.get_key("gmail.oauth.refresh"))
+    except keychain.KeychainError:
+        connected = False
+    return _emit({
+        "enabled": bool(store.get("gmail_enabled")),
+        "connected": connected,
+        "account": store.get("gmail_account") or "",
+        "poll_interval": store.get("gmail_poll_interval"),
+        "filter": store.get("gmail_query_filter"),
+    })
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -266,6 +286,8 @@ def main():
     p = sub.add_parser("inbox")
     p.add_argument("--json", action="store_true")
 
+    sub.add_parser("gmail-status")
+
     args = parser.parse_args()
     handler = {
         "status": cmd_status,
@@ -275,6 +297,7 @@ def main():
         "probe": cmd_probe,
         "tasks": cmd_tasks,
         "inbox": cmd_inbox,
+        "gmail-status": cmd_gmail_status,
     }[args.cmd]
     sys.exit(handler(args))
 

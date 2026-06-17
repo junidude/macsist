@@ -31,14 +31,19 @@ switching; M12: real signed **Macsist.app** bundle — py2app standalone build
 unusable), fixed self-signed "Macsist Signing" identity so TCC survives every
 redeploy, installed at `…/Application Support/Macsist/Macsist.app`, launchd
 runs the bundle executable — as-built notes in `docs/SPEC.md` §5.5–5.8).
-**M13–M14 shipped** — the **Assistant** subsystem (`app/assistant/`): M13
+**M13–M17 shipped** — the **Assistant** subsystem (`app/assistant/`): M13
 read-only kanban cockpit over Hermes (`hermes_bridge` = RO `~/.hermes/kanban.db`
 + `hermes` CLI, never writes the DB) + 작업 tab + menu-bar badge; M14
 propose-then-confirm engine (local M9 brain, zero Hermes-gateway dependency) —
 work threads ("어디까지 했더라"), deterministic `kind→risk` + structural
 `assert_approved` gate (no side effect without a user approval row),
-ProposalPanel, `macsist propose|approve|scan|inbox|tasks`. Full design + the
-M15–M18 roadmap (Telegram / remote Claude Code·Codex / Gmail / Calendar):
+ProposalPanel, `macsist propose|approve|scan|inbox|tasks`; M15 Telegram
+delivery (away/quiet-hours via `hermes send`); M16 remote agent delegation
+(SSH → tmux codex on nhn-container, confirm-gated); M17 **Gmail** (in-process
+REST + Keychain loopback-PKCE OAuth + LLM triage → reply-draft proposals, OFF by
+default; **two-step send** — approve→Gmail DRAFT, explicit "지금 보내기"→`drafts.send`,
+never auto; Settings "Gmail" card, `macsist gmail`, needs a user-supplied GCP
+Desktop OAuth client JSON). Full design + the M18 Calendar roadmap:
 **`docs/ASSISTANT.md`**.
 
 ## Stack (locked)
