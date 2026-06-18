@@ -65,10 +65,10 @@ _RISK_COLOR = {
     risk.CONFIRM: (0.95, 0.62, 0.11),
     risk.NEVER_AUTO: (0.90, 0.28, 0.28),
 }
-_RISK_LABEL = {
-    risk.AUTO: "자동",
-    risk.CONFIRM: "확인 필요",
-    risk.NEVER_AUTO: "전송 주의",
+_RISK_LABEL_KEY = {
+    risk.AUTO: "assistant.risk_auto",
+    risk.CONFIRM: "assistant.risk_confirm",
+    risk.NEVER_AUTO: "assistant.risk_never",
 }
 
 
@@ -102,7 +102,7 @@ def _badge(klass, x, top_y):
     """Risk badge as a colored rounded box with a vertically-centred label
     (a bare NSTextField top-aligns the glyphs — hence the box+label)."""
     r, g, b = _RISK_COLOR.get(klass, _RISK_COLOR[risk.NEVER_AUTO])
-    text = _RISK_LABEL.get(klass, klass.upper())
+    text = t(_RISK_LABEL_KEY.get(klass, "assistant.risk_never"))
     w, h = 78.0, 22.0
     box = NSBox.alloc().initWithFrame_(NSMakeRect(x, top_y, w, h))
     box.setBoxType_(NSBoxCustom)
@@ -158,7 +158,8 @@ def _mail_fields(prop):
     to = str(args.get("to") or "")
     subject = str(args.get("subject") or "")
     body = str(args.get("draft") or "")
-    meta = f"받는사람  {to}      제목  {subject}"
+    meta = (f"{t('assistant.mail_to')}  {to}      "
+            f"{t('assistant.mail_subject')}  {subject}")
     return meta, body
 
 

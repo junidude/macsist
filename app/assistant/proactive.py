@@ -23,6 +23,7 @@ from assistant import risk
 from assistant.audit_store import NotApproved
 from assistant.gmail_triage import GmailExecutor
 from assistant.thread_store import ThreadStore
+from i18n import t
 from llm_client import LLMClient, LLMError, StreamHandle
 
 
@@ -130,7 +131,7 @@ class ProactiveEngine:
             tid = str(pick.get("thread_id") or pick.get("msg_id") or "")
             prop = self._emit(
                 kind="reply_draft",
-                title=str(pick.get("title") or "메일 답장 초안")[:200],
+                title=str(pick.get("title") or t("assistant.reply_draft_title"))[:200],
                 rationale=str(pick.get("rationale") or ""),
                 source="gmail",
                 source_ref=f"gmail:{tid}",
@@ -285,8 +286,8 @@ class ProactiveEngine:
         args = (reply_prop.get("payload") or {}).get("args") or {}
         self._emit(
             kind="send_reply",
-            title=f"지금 보내기: {reply_prop.get('title', '')}"[:200],
-            rationale="초안이 생성되었습니다. 검토 후 보내세요. (Gmail에서 수정 가능)",
+            title=f"{t('assistant.send_now')}: {reply_prop.get('title', '')}"[:200],
+            rationale=t("assistant.draft_ready"),
             source="gmail",
             source_ref=f"send:{draft_id}",
             payload={"action": "send_draft", "args": {

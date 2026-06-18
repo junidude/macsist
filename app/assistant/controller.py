@@ -25,6 +25,7 @@ from assistant.proactive import ProactiveEngine
 from assistant.proposal_store import ProposalStore
 from assistant.remote_exec import RemoteAgentExecutor, RemoteJobStore
 from assistant.thread_store import ThreadStore
+from i18n import t
 from text_capture import capture_selected_text
 
 
@@ -310,10 +311,11 @@ class AssistantController:
             args = (prop.get("payload") or {}).get("args") or {}
             subject = str(args.get("subject") or "")
             self.threads.create(
-                title=f"메일 답장 보냄: {subject}".strip(),
+                title=f"{t('assistant.mail_sent_title')}: {subject}".strip(),
                 source="gmail",
-                where_was_i=f"받는사람 {args.get('to', '')}\n\n{args.get('draft', '')}"[:800],
-                next_action="필요하면 후속 확인",
+                where_was_i=(f"{t('assistant.mail_to')} {args.get('to', '')}\n\n"
+                             f"{args.get('draft', '')}")[:800],
+                next_action=t("assistant.mail_followup"),
                 status="done",
             )
             if self.deliverer.should_telegram():
