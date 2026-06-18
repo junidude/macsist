@@ -27,6 +27,13 @@ def _now():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def payload_args(prop):
+    """The proposal's payload.args dict (always a dict). Single source for the
+    `(prop.get("payload") or {}).get("args") or {}` idiom used across the engine
+    and controller."""
+    return ((prop or {}).get("payload") or {}).get("args") or {}
+
+
 class ProposalStore:
     def __init__(self, config, path=None):
         self.config = config

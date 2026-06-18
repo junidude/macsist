@@ -17,23 +17,10 @@ to pin it to the local MLX server (the digest then never leaves the machine).
 import json
 
 from i18n import t
-from llm_client import LLMClient, LLMError, StreamHandle
+from llm_client import LLMClient
 
 from assistant.gmail_client import GmailClient, _addr
-
-
-def _extract_json_array(text):
-    """Pull the first JSON array out of an LLM reply (tolerates fences/prose)."""
-    if not text:
-        return None
-    text = text.strip()
-    i, j = text.find("["), text.rfind("]")
-    if 0 <= i < j:
-        try:
-            return json.loads(text[i:j + 1])
-        except ValueError:
-            return None
-    return None
+from assistant.llm_util import complete_text, extract_json
 
 
 class _ForceLocalConfig:
@@ -56,7 +43,9 @@ class _ForceLocalConfig:
 
 def _resub(subject):
     s = str(subject or "").strip()
-    return s if s.lower().startswith("re:") else f"Re: {s}" if s else "Re:"
+    if not s:
+        return "Re:"
+    return s if s.lower().startswith("re:") else f"Re: {s}"
 
 
 class GmailTriager:
@@ -115,41 +104,20 @@ class GmailTriager:
         instruction = str(instruction or "").strip()
         if not instruction:
             return None
-        system = str(self.config.get("gmail_revise_system"))
         user = (str(self.config.get("gmail_revise_user"))
                 .replace("<<SUBJECT>>", str(subject or ""))
                 .replace("<<DRAFT>>", str(draft or ""))
                 .replace("<<INSTRUCTION>>", instruction))
-        model = str(self.config.get("assistant_model")) or None
-        buf = []
-        try:
-            for chunk in self.llm.stream_chat(
-                    [{"role": "system", "content": system},
-                     {"role": "user", "content": user}],
-                    StreamHandle(), model=model):
-                buf.append(chunk)
-        except LLMError as exc:
-            print(f"gmail revise: LLM unavailable ({exc})", flush=True)
-            return None
-        text = "".join(buf).strip()
-        return text or None
+        return complete_text(
+            self.llm, self.config,
+            str(self.config.get("gmail_revise_system")), user) or None
 
     def _llm_pick(self, digest):
-        system = str(self.config.get("gmail_triage_system"))
         user = str(self.config.get("gmail_triage_user")).replace(
             "<<DIGEST>>", digest)
-        model = str(self.config.get("assistant_model")) or None
-        messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": user}]
-        buf = []
-        try:
-            for chunk in self.llm.stream_chat(
-                    messages, StreamHandle(), model=model):
-                buf.append(chunk)
-        except LLMError as exc:
-            print(f"gmail triage: LLM unavailable ({exc})", flush=True)
-            return []
-        data = _extract_json_array("".join(buf))
+        data = extract_json(complete_text(
+            self.llm, self.config,
+            str(self.config.get("gmail_triage_system")), user))
         return [d for d in data if isinstance(d, dict)] if isinstance(
             data, list) else []
 

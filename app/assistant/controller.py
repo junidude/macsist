@@ -21,8 +21,8 @@ from assistant.monitor import (
 )
 from assistant.gmail_monitor import GmailMonitor
 from assistant.gmail_triage import GmailTriager
-from assistant.proactive import ProactiveEngine
-from assistant.proposal_store import ProposalStore
+from assistant.proactive import DEFERRED, ProactiveEngine
+from assistant.proposal_store import ProposalStore, payload_args
 from assistant.remote_exec import RemoteAgentExecutor, RemoteJobStore
 from assistant.thread_store import ThreadStore
 from i18n import t
@@ -263,11 +263,11 @@ class AssistantController:
 
     def _draftGmail(self, prop):
         """Engine hook (past assert_approved): create the Gmail DRAFT on a worker
-        thread so the panel-approve click never blocks on the network."""
-        args = (prop.get("payload") or {}).get("args") or {}
-        threading.Thread(target=self._draftWorker, args=(prop, args),
+        thread so the panel-approve click never blocks on the network. Terminal
+        state is recorded by _draftDone (DEFERRED — see proactive.execute)."""
+        threading.Thread(target=self._draftWorker, args=(prop, payload_args(prop)),
                         daemon=True, name="gmail-draft").start()
-        return "drafting"
+        return DEFERRED
 
     def _draftWorker(self, prop, args):
         draft_id = err = None
@@ -279,21 +279,22 @@ class AssistantController:
 
     def _draftDone(self, prop, draft_id, err):
         if err or not draft_id:
-            self.proposals.mark_decided(prop["id"], "failed",
-                                        error=err or t("assistant.err_draft_create"))
+            self.engine.finalize_failed(
+                prop["id"], err or t("assistant.err_draft_create"),
+                gesture="gmail_draft")
         else:
-            # carry the real draft id + surface the 2nd-gesture send card
-            self.proposals.update(prop["id"], result_ref=draft_id)
+            # record executed only now that the draft really exists, then surface
+            # the 2nd-gesture send card carrying the real draft id
+            self.engine.finalize_executed(prop["id"], draft_id, gesture="gmail_draft")
             self.engine.emit_send_reply(prop, draft_id)
         self._refresh()
 
     def _sendGmail(self, prop):
         """Engine hook (past assert_approved, never_auto): send the DRAFT on a
         worker thread. Only ever reached via the explicit '지금 보내기' gesture."""
-        args = (prop.get("payload") or {}).get("args") or {}
-        threading.Thread(target=self._sendWorker, args=(prop, args),
+        threading.Thread(target=self._sendWorker, args=(prop, payload_args(prop)),
                         daemon=True, name="gmail-send").start()
-        return "sending"
+        return DEFERRED
 
     def _sendWorker(self, prop, args):
         sent_id = err = None
@@ -305,26 +306,29 @@ class AssistantController:
 
     def _sendDone(self, prop, sent_id, err):
         if err or not sent_id:
-            self.proposals.mark_decided(prop["id"], "failed",
-                                        error=err or t("assistant.err_send"))
-        else:
-            self.proposals.update(prop["id"], result_ref=sent_id)
-            print(f"gmail: sent {sent_id}", flush=True)
-            # leave a persistent trace in the 비서 window (like a remote job)
-            args = (prop.get("payload") or {}).get("args") or {}
-            subject = str(args.get("subject") or "")
-            self.threads.create(
-                title=f"{t('assistant.mail_sent_title')}: {subject}".strip(),
-                source="gmail",
-                where_was_i=(f"{t('assistant.mail_to')} {args.get('to', '')}\n\n"
-                             f"{args.get('draft', '')}")[:800],
-                next_action=t("assistant.mail_followup"),
-                status="done",
-            )
-            if self.deliverer.should_telegram():
-                self.deliverer.send_telegram(
-                    f"📧 [{t('assistant.mail_sent_title')}] {subject}\n"
-                    f"{t('assistant.mail_to')} {args.get('to', '')}")
+            self.engine.finalize_failed(
+                prop["id"], err or t("assistant.err_send"), gesture="gmail_send")
+            self._refresh()
+            return
+        # executed = Gmail accepted the send (audit reflects reality)
+        self.engine.finalize_executed(prop["id"], sent_id, gesture="gmail_send")
+        print(f"gmail: sent {sent_id}", flush=True)
+        # leave a persistent trace in the 비서 window (like a remote job)
+        args = payload_args(prop)
+        subject = str(args.get("subject") or "")
+        self.threads.create(
+            title=f"{t('assistant.mail_sent_title')}: {subject}".strip(),
+            source="gmail",
+            where_was_i=(f"{t('assistant.mail_to')} {args.get('to', '')}\n\n"
+                         f"{args.get('draft', '')}")[:800],
+            next_action=t("assistant.mail_followup"),
+            status="done",
+        )
+        if self.deliverer.should_telegram():
+            self.deliverer.send_telegram(
+                f"📧 [{t('assistant.mail_sent_title')}] {subject}\n"
+                f"{t('assistant.mail_to')} {args.get('to', '')}")
+        self._refresh()
         self._refresh()
 
     def reviseDraft(self, pid, instruction):
@@ -339,8 +343,7 @@ class AssistantController:
                         daemon=True, name="gmail-revise").start()
 
     def _reviseWorker(self, pid, instruction):
-        prop = self.proposals.get(pid)
-        args = (prop.get("payload") or {}).get("args") or {}
+        args = payload_args(self.proposals.get(pid))
         new_draft = self.gmail_triager.revise(
             args.get("draft", ""), instruction, args.get("subject", ""))
         AppHelper.callAfter(self._reviseDone, pid, new_draft)

@@ -18,6 +18,8 @@ import json
 
 import httpx
 
+from i18n import t
+
 from assistant import gmail_oauth
 
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -39,7 +41,8 @@ class GmailClient:
             r = httpx.request(method, _API + path, params=params, json=body,
                               headers=headers, timeout=timeout)
         except httpx.HTTPError as exc:
-            return {"error": f"Gmail 통신 오류: {exc.__class__.__name__}"}
+            return {"error": t("gmail.client.comm_error").format(
+                err=exc.__class__.__name__)}
         if r.status_code == 404:
             return {"error": "404", "status": 404}
         if r.status_code >= 400:
@@ -48,7 +51,8 @@ class GmailClient:
                 detail = r.json().get("error", {}).get("message", "")
             except ValueError:
                 pass
-            return {"error": f"Gmail HTTP {r.status_code}: {detail}"[:200],
+            return {"error": t("gmail.client.http_error").format(
+                        status=r.status_code, detail=detail)[:200],
                     "status": r.status_code}
         try:
             return r.json()
@@ -121,7 +125,7 @@ class GmailClient:
             "id": data.get("id"),
             "thread_id": data.get("threadId"),
             "from": headers.get("from", ""),
-            "subject": headers.get("subject", "(제목 없음)"),
+            "subject": headers.get("subject", t("gmail.no_subject")),
             "date": headers.get("date", ""),
             "message_id_header": headers.get("message-id", ""),
             "snippet": data.get("snippet", ""),

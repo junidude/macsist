@@ -243,7 +243,8 @@ def cmd_gmail_status(args):
     except Exception as exc:
         return _emit({"error": str(exc)}, ok=False)
     try:
-        connected = bool(keychain.get_key("gmail.oauth.refresh"))
+        from config import GMAIL_OAUTH_REFRESH_ACCOUNT
+        connected = bool(keychain.get_key(GMAIL_OAUTH_REFRESH_ACCOUNT))
     except keychain.KeychainError:
         connected = False
     return _emit({

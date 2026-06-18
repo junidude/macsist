@@ -22,9 +22,16 @@ from datetime import datetime, timedelta, timezone
 from assistant import risk
 from assistant.audit_store import NotApproved
 from assistant.gmail_triage import GmailExecutor
+from assistant.llm_util import complete_text, extract_json
+from assistant.proposal_store import payload_args
 from assistant.thread_store import ThreadStore
 from i18n import t
-from llm_client import LLMClient, LLMError, StreamHandle
+from llm_client import LLMClient
+
+# Returned by an executor hook that finishes its side effect ASYNCHRONOUSLY on a
+# worker thread (Gmail draft/send): execute() must NOT record a terminal state —
+# the controller calls finalize_executed/finalize_failed when the work lands.
+DEFERRED = "__deferred__"
 
 
 def _now_iso():
@@ -33,22 +40,6 @@ def _now_iso():
 
 def _idem(kind, source_ref):
     return hashlib.sha1(f"{kind}:{source_ref}".encode("utf-8")).hexdigest()[:16]
-
-
-def _extract_json(text):
-    """Pull the first JSON value out of an LLM reply (tolerates code fences /
-    prose around it). Returns the parsed value or None."""
-    if not text:
-        return None
-    text = text.strip()
-    for opener, closer in (("[", "]"), ("{", "}")):
-        i, j = text.find(opener), text.rfind(closer)
-        if 0 <= i < j:
-            try:
-                return json.loads(text[i:j + 1])
-            except ValueError:
-                continue
-    return None
 
 
 class ProactiveEngine:
@@ -217,7 +208,9 @@ class ProactiveEngine:
 
     def execute(self, pid):
         """Run a proposal's side effect — ONLY past the structural gate. Any
-        kind without an M14 executor (send/remote/calendar) fails cleanly."""
+        kind without an M14 executor (send/remote/calendar) fails cleanly.
+        Async executors (Gmail draft/send) return DEFERRED: the terminal state
+        is recorded later by the controller via finalize_executed/_failed."""
         prop = self.proposals.get(pid)
         if prop is None:
             return None
@@ -225,18 +218,39 @@ class ProactiveEngine:
             self.audit.assert_approved(pid)  # the single structural bottleneck
         except NotApproved as exc:
             print(f"proactive: BLOCKED execute {pid} — {exc}", flush=True)
-            return self.proposals.mark_decided(pid, "failed", error=str(exc))
+            return self.finalize_failed(pid, str(exc))
         kind = prop.get("kind")
         try:
             result_ref = self._run_executor(prop)
         except Exception as exc:  # an executor failure must not crash the app
             print(f"proactive: executor {kind} failed: {exc!r}", flush=True)
-            done = self.proposals.mark_decided(pid, "failed", error=repr(exc))
-        else:
-            self.audit.record(pid, prop.get("status"), "executed", by="system",
-                              gesture="execute")
-            done = self.proposals.mark_decided(pid, "executed",
-                                               result_ref=result_ref)
+            return self.finalize_failed(pid, repr(exc))
+        if result_ref == DEFERRED:
+            return prop                 # terminal state lands via finalize_*
+        return self.finalize_executed(pid, result_ref)
+
+    def finalize_executed(self, pid, result_ref=None, gesture="execute"):
+        """Record the executed terminal state (audit + status + UI). Public so
+        an async executor's completion callback (controller) can land here."""
+        prop = self.proposals.get(pid)
+        if prop is None:
+            return None
+        self.audit.record(pid, prop.get("status"), "executed", by="system",
+                          gesture=gesture)
+        done = self.proposals.mark_decided(pid, "executed", result_ref=result_ref)
+        if self.on_executed is not None:
+            self.on_executed(done)
+        return done
+
+    def finalize_failed(self, pid, error, gesture="execute"):
+        """Record the failed terminal state (audit + status + UI) — every state
+        change is audited, sync or async."""
+        prop = self.proposals.get(pid)
+        if prop is None:
+            return None
+        self.audit.record(pid, prop.get("status"), "failed", by="system",
+                          gesture=gesture)
+        done = self.proposals.mark_decided(pid, "failed", error=str(error))
         if self.on_executed is not None:
             self.on_executed(done)
         return done
@@ -267,16 +281,16 @@ class ProactiveEngine:
             # off the main thread (controller hook); the send_reply follow-up is
             # emitted when the draft id comes back (controller -> emit_send_reply).
             if self.on_gmail_draft is not None:
-                return self.on_gmail_draft(prop)            # -> "drafting"
-            draft_id = self.gmail.create_draft(payload.get("args") or {})
+                return self.on_gmail_draft(prop)            # -> DEFERRED
+            draft_id = self.gmail.create_draft(payload_args(prop))
             self.emit_send_reply(prop, draft_id)            # headless fallback
             return draft_id
         if kind == "send_reply":
             # M17 step 2: only ever reached via a user gesture on the send card
             # (never_auto) → assert_approved already passed in execute().
             if self.on_gmail_send is not None:
-                return self.on_gmail_send(prop)             # -> "sending"
-            return self.gmail.send_draft(payload.get("args") or {})
+                return self.on_gmail_send(prop)             # -> DEFERRED
+            return self.gmail.send_draft(payload_args(prop))
         # No executor for this kind yet (calendar_*/…).
         raise NotImplementedError(f"executor for kind '{kind}' arrives later")
 
@@ -284,7 +298,7 @@ class ProactiveEngine:
         """Follow-up to a created draft: a never_auto send_reply proposal whose
         approval IS the explicit "지금 보내기" gesture. Carries the draft id so the
         executor sends exactly that (Gmail-side edits update the same draft)."""
-        args = (reply_prop.get("payload") or {}).get("args") or {}
+        args = payload_args(reply_prop)
         self._emit(
             kind="send_reply",
             title=f"{t('assistant.send_now')}: {reply_prop.get('title', '')}"[:200],
@@ -427,15 +441,4 @@ class ProactiveEngine:
         return []
 
     def _llm_json(self, system, user):
-        model = str(self.config.get("assistant_model")) or None
-        messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": user}]
-        buf = []
-        try:
-            for chunk in self.client.stream_chat(
-                messages, StreamHandle(), model=model):
-                buf.append(chunk)
-        except LLMError as exc:
-            print(f"proactive: LLM unavailable ({exc}) — fallback", flush=True)
-            return None
-        return _extract_json("".join(buf))
+        return extract_json(complete_text(self.client, self.config, system, user))

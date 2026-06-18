@@ -34,9 +34,11 @@ import webbrowser
 import httpx
 
 import keychain
-
-CLIENT_ACCOUNT = "gmail.oauth.client"
-REFRESH_ACCOUNT = "gmail.oauth.refresh"
+from config import (
+    GMAIL_OAUTH_CLIENT_ACCOUNT as CLIENT_ACCOUNT,
+    GMAIL_OAUTH_REFRESH_ACCOUNT as REFRESH_ACCOUNT,
+)
+from i18n import t
 
 _AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -74,16 +76,17 @@ def load_client(config):
             pass
     path = os.path.expanduser(str(config.get("gmail_client_json_path")))
     if not os.path.isfile(path) or os.path.getsize(path) == 0:
-        raise GmailAuthError(
-            f"GCP OAuth 클라이언트 JSON이 비어있거나 없습니다: {path}")
+        raise GmailAuthError(t("gmail.oauth.client_empty").format(path=path))
     try:
-        raw = json.loads(open(path, encoding="utf-8").read())
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
     except (OSError, ValueError) as exc:
-        raise GmailAuthError(f"클라이언트 JSON을 읽을 수 없습니다: {exc}") from None
+        raise GmailAuthError(
+            t("gmail.oauth.client_unreadable").format(err=exc)) from None
     node = raw.get("installed") or raw.get("web") or raw
     cid, csecret = node.get("client_id"), node.get("client_secret")
     if not cid:
-        raise GmailAuthError("client_id가 JSON에 없습니다 (Desktop 클라이언트인지 확인)")
+        raise GmailAuthError(t("gmail.oauth.no_client_id"))
     client = {"client_id": cid, "client_secret": csecret or ""}
     keychain.set_key(CLIENT_ACCOUNT, json.dumps(client))
     return client
@@ -109,8 +112,8 @@ class _CodeHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
-        msg = ("연결되었습니다. 이 창을 닫아주세요." if self.server.auth_code
-               else "연결에 실패했습니다.")
+        msg = (t("gmail.oauth.page_ok") if self.server.auth_code
+               else t("gmail.oauth.page_fail"))
         self.wfile.write(
             f"<html><body style='font-family:sans-serif;padding:3em'>"
             f"<h2>Macsist · Gmail</h2><p>{msg}</p></body></html>"
@@ -150,12 +153,13 @@ def connect(config, timeout=180):
     try:
         server.handle_request()        # blocks until one redirect (or timeout)
     except socket.timeout:
-        raise GmailAuthError("OAuth 응답 시간 초과 — 다시 시도하세요") from None
+        raise GmailAuthError(t("gmail.oauth.timeout")) from None
     finally:
         server.server_close()
 
     if server.auth_error or not server.auth_code:
-        raise GmailAuthError(f"동의 실패: {server.auth_error or '코드 없음'}")
+        raise GmailAuthError(t("gmail.oauth.consent_failed").format(
+            err=server.auth_error or "no code"))
 
     try:
         resp = httpx.post(_TOKEN_URI, data={
@@ -167,13 +171,15 @@ def connect(config, timeout=180):
             "redirect_uri": redirect_uri,
         }, timeout=30)
     except httpx.HTTPError as exc:
-        raise GmailAuthError(f"토큰 교환 통신 오류: {exc.__class__.__name__}") from None
+        raise GmailAuthError(t("gmail.oauth.token_comm").format(
+            err=exc.__class__.__name__)) from None
     if resp.status_code != 200:
-        raise GmailAuthError(f"토큰 교환 실패 (HTTP {resp.status_code})")
+        raise GmailAuthError(t("gmail.oauth.token_failed").format(
+            status=resp.status_code))
     tok = resp.json()
     refresh = tok.get("refresh_token")
     if not refresh:
-        raise GmailAuthError("refresh_token이 응답에 없습니다 (prompt=consent 필요)")
+        raise GmailAuthError(t("gmail.oauth.no_refresh"))
     keychain.set_key(REFRESH_ACCOUNT, refresh)
     addr = _whoami(tok.get("access_token"))
     if addr:
@@ -188,10 +194,10 @@ def access_token():
     the token string. Never persisted. Raises GmailAuthError if not connected."""
     refresh = keychain.get_key(REFRESH_ACCOUNT)
     if not refresh:
-        raise GmailAuthError("Gmail이 연결되지 않았습니다 (Settings → Gmail 연결)")
+        raise GmailAuthError(t("gmail.oauth.not_connected"))
     client = keychain.get_key(CLIENT_ACCOUNT)
     if not client:
-        raise GmailAuthError("OAuth 클라이언트 정보 없음 — 다시 연결하세요")
+        raise GmailAuthError(t("gmail.oauth.no_client"))
     client = json.loads(client)
     try:
         resp = httpx.post(_TOKEN_URI, data={
@@ -201,14 +207,16 @@ def access_token():
             "grant_type": "refresh_token",
         }, timeout=30)
     except httpx.HTTPError as exc:
-        raise GmailAuthError(f"토큰 갱신 통신 오류: {exc.__class__.__name__}") from None
+        raise GmailAuthError(t("gmail.oauth.refresh_comm").format(
+            err=exc.__class__.__name__)) from None
     if resp.status_code != 200:
         # a revoked / expired grant comes back 400 invalid_grant — surface it so
         # the user re-connects instead of silently failing every poll.
-        raise GmailAuthError(f"토큰 갱신 실패 (HTTP {resp.status_code}) — 재연결 필요")
+        raise GmailAuthError(t("gmail.oauth.refresh_failed").format(
+            status=resp.status_code))
     token = resp.json().get("access_token")
     if not token:
-        raise GmailAuthError("access_token이 응답에 없습니다")
+        raise GmailAuthError(t("gmail.oauth.no_access"))
     return token
 
 

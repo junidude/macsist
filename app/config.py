@@ -14,6 +14,11 @@ import i18n
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "Macsist"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
+# Keychain account names — single source of truth (M17). gmail_oauth.py stores
+# under these; cli/configure.py reads them. Change here, reflected everywhere.
+GMAIL_OAUTH_CLIENT_ACCOUNT = "gmail.oauth.client"    # client_id/secret (JSON)
+GMAIL_OAUTH_REFRESH_ACCOUNT = "gmail.oauth.refresh"  # long-lived refresh token
+
 
 def asset_dir() -> Path:
     """assets/ next to the modules (dev run) or Contents/Resources/assets
