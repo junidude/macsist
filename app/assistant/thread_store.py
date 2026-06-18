@@ -110,6 +110,20 @@ class ThreadStore:
     def active(self):
         return [t for t in self.all() if t.get("status") == ACTIVE]
 
+    def for_display(self, done_limit=8):
+        """Active threads + the most-recent done ones, so completed actions
+        (e.g. a sent mail reply, M17) stay visible in the 비서 window without
+        being stale-nudge targets (the engine only scans active()). all() is
+        already sorted by recency."""
+        active, done = [], []
+        for t in self.all():
+            status = t.get("status")
+            if status == ACTIVE:
+                active.append(t)
+            elif status == DONE and len(done) < done_limit:
+                done.append(t)
+        return active + done
+
     @staticmethod
     def idle_hours(thread):
         """Hours since last_touched_ts (used by the staleness signal)."""

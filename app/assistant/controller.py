@@ -306,6 +306,19 @@ class AssistantController:
         else:
             self.proposals.update(prop["id"], result_ref=sent_id)
             print(f"gmail: sent {sent_id}", flush=True)
+            # leave a persistent trace in the 비서 window (like a remote job)
+            args = (prop.get("payload") or {}).get("args") or {}
+            subject = str(args.get("subject") or "")
+            self.threads.create(
+                title=f"메일 답장 보냄: {subject}".strip(),
+                source="gmail",
+                where_was_i=f"받는사람 {args.get('to', '')}\n\n{args.get('draft', '')}"[:800],
+                next_action="필요하면 후속 확인",
+                status="done",
+            )
+            if self.deliverer.should_telegram():
+                self.deliverer.send_telegram(
+                    f"📧 [메일 전송] {subject}\n받는사람: {args.get('to', '')}")
         self._refresh()
 
     def syncGmail(self):

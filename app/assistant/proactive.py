@@ -293,6 +293,7 @@ class ProactiveEngine:
                 "draft_id": draft_id,
                 "to": args.get("to", ""),
                 "subject": args.get("subject", ""),
+                "draft": args.get("draft", ""),   # show exactly what will be sent
             }},
         )
 

@@ -844,7 +844,7 @@ class MainWindowController(NSObject):
         threads = []
         if self.assistant_threads is not None:
             try:
-                threads = self.assistant_threads.active()
+                threads = self.assistant_threads.for_display()
             except Exception as exc:
                 print(f"assistant tab: thread read error {exc!r}", flush=True)
         tasks = []

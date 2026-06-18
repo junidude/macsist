@@ -1,29 +1,40 @@
-"""ProposalPanelController — the confirm surface for proposals (M14).
+"""ProposalPanelController — the confirm surface for proposals (M14, M17 redesign).
 
-A non-activating floating glass card (result_panel rules: canBecomeKeyWindow
+A non-activating floating **glass** card (result_panel rules: canBecomeKeyWindow
 False, setHidesOnDeactivate_(False), orderFrontRegardless — NEVER steals focus,
-the app never activates). Frosted glass with a tint so it reads as a solid card
-(not a stark white box), a risk-colored badge, the rationale, and pill buttons
-(승인 = accent, 건너뛰기 / 나중에 = subtle). Sizes to its content; advances to
-the next pending proposal after an action, or hides.
+the app never activates). It uses the same Liquid-Glass backdrop as the result
+panel so it reads as part of the app, not a stark white box.
+
+The card shows everything needed to decide:
+  · a risk-colored, vertically-centred badge + source
+  · the title (primary) and the rationale (secondary)
+  · for mail proposals (reply_draft / send_reply): the **recipient + subject +
+    the actual draft body** in a scrollable text view — you can't confirm a send
+    you can't read.
+Pill buttons (승인 / 지금 보내기 = accent · 건너뛰기 / 나중에 = subtle). Sizes to
+its content; advances to the next pending proposal after an action, or hides.
 """
 
 import objc
 from AppKit import (
     NSBackingStoreBuffered,
-    NSButton,
+    NSBezelStyleRegularSquare,
+    NSBox,
+    NSBoxCustom,
     NSColor,
     NSFloatingWindowLevel,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
-    NSLineBreakByTruncatingTail,
+    NSMakeSize,
     NSMutableParagraphStyle,
     NSPanel,
     NSParagraphStyleAttributeName,
     NSScreen,
+    NSScrollView,
     NSTextAlignmentCenter,
     NSTextField,
+    NSTextView,
     NSView,
     NSViewHeightSizable,
     NSViewWidthSizable,
@@ -34,7 +45,8 @@ from AppKit import (
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
 )
-from Foundation import NSAttributedString, NSMakeRect, NSMakeSize, NSObject
+from Foundation import NSAttributedString, NSMakeRect, NSObject
+from ui_kit import PillButton
 
 from assistant import risk
 from i18n import t
@@ -44,35 +56,110 @@ try:
 except objc.error:
     _Glass = None
 
-_W = 420.0
-_PAD = 20.0
+_W = 460.0
+_PAD = 22.0
+_BODY_H = 188.0          # visible height of the scrollable draft body
+_MAIL_KINDS = ("reply_draft", "send_reply")
 _RISK_COLOR = {
-    risk.AUTO: (0.20, 0.65, 0.30),
-    risk.CONFIRM: (0.90, 0.58, 0.10),
-    risk.NEVER_AUTO: (0.85, 0.25, 0.25),
+    risk.AUTO: (0.20, 0.66, 0.33),
+    risk.CONFIRM: (0.95, 0.62, 0.11),
+    risk.NEVER_AUTO: (0.90, 0.28, 0.28),
+}
+_RISK_LABEL = {
+    risk.AUTO: "자동",
+    risk.CONFIRM: "확인 필요",
+    risk.NEVER_AUTO: "전송 주의",
 }
 
 
 def _pill(target, title, action, x, y, w, h, fill, text_color):
-    """A layer-backed rounded pill button (matches the app's pill style).
-    Module-level — NSObject methods need selector arity (project memory)."""
-    b = NSButton.alloc().initWithFrame_(NSMakeRect(x, y, w, h))
+    """A hover-tinted rounded pill (ui_kit.PillButton) with a fixed fill for the
+    accent action; subtle buttons inherit PillButton's label-tint hover."""
+    b = PillButton.alloc().initWithFrame_(NSMakeRect(x, y, w, h))
     b.setBordered_(False)
+    b.setBezelStyle_(NSBezelStyleRegularSquare)
     b.setWantsLayer_(True)
     b.layer().setCornerRadius_(h / 2.0)
-    b.layer().setBackgroundColor_(fill.CGColor())
+    b.layer().setMasksToBounds_(True)
     para = NSMutableParagraphStyle.alloc().init()
     para.setAlignment_(NSTextAlignmentCenter)
-    attrs = {
-        NSForegroundColorAttributeName: text_color,
-        NSFontAttributeName: NSFont.systemFontOfSize_(14.0),
-        NSParagraphStyleAttributeName: para,
-    }
-    b.setAttributedTitle_(
-        NSAttributedString.alloc().initWithString_attributes_(title, attrs))
+    b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
+        title, {
+            NSForegroundColorAttributeName: text_color,
+            NSFontAttributeName: NSFont.systemFontOfSize_(14.0),
+            NSParagraphStyleAttributeName: para,
+        }))
     b.setTarget_(target)
     b.setAction_(action)
+    if fill is not None:                       # accent: fixed fill, no hover tint
+        b.layer().setBackgroundColor_(fill.CGColor())
+    else:
+        b.refreshFill()                        # subtle: label-tint + hover
     return b
+
+
+def _badge(klass, x, top_y):
+    """Risk badge as a colored rounded box with a vertically-centred label
+    (a bare NSTextField top-aligns the glyphs — hence the box+label)."""
+    r, g, b = _RISK_COLOR.get(klass, _RISK_COLOR[risk.NEVER_AUTO])
+    text = _RISK_LABEL.get(klass, klass.upper())
+    w, h = 78.0, 22.0
+    box = NSBox.alloc().initWithFrame_(NSMakeRect(x, top_y, w, h))
+    box.setBoxType_(NSBoxCustom)
+    box.setTitlePosition_(0)
+    box.setBorderWidth_(0.0)
+    box.setCornerRadius_(h / 2.0)
+    box.setContentViewMargins_(NSMakeSize(0, 0))
+    box.setFillColor_(NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0))
+    label = NSTextField.labelWithString_(text)
+    label.setFont_(NSFont.boldSystemFontOfSize_(11.0))
+    label.setTextColor_(NSColor.whiteColor())
+    label.setAlignment_(NSTextAlignmentCenter)
+    label.setFrame_(NSMakeRect(0, (h - 15) / 2.0, w, 15))
+    box.contentView().addSubview_(label)
+    return box
+
+
+def _body_view(text, x, y, w, height):
+    """A read-only, scrollable draft body on a subtle rounded panel so the user
+    can actually read what will be sent before confirming. Module-level — an
+    NSObject method with this many args trips PyObjC selector arity."""
+    box = NSBox.alloc().initWithFrame_(NSMakeRect(x, y, w, height))
+    box.setBoxType_(NSBoxCustom)
+    box.setTitlePosition_(0)
+    box.setBorderWidth_(0.0)
+    box.setCornerRadius_(12.0)
+    box.setContentViewMargins_(NSMakeSize(0, 0))
+    box.setFillColor_(NSColor.labelColor().colorWithAlphaComponent_(0.05))
+
+    scroll = NSScrollView.alloc().initWithFrame_(
+        NSMakeRect(4, 4, w - 8, height - 8))
+    scroll.setDrawsBackground_(False)
+    scroll.setHasVerticalScroller_(True)
+    scroll.setAutohidesScrollers_(True)
+    tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, w - 8, height - 8))
+    tv.setString_(text)
+    tv.setEditable_(False)
+    tv.setSelectable_(True)
+    tv.setDrawsBackground_(False)
+    tv.setFont_(NSFont.systemFontOfSize_(13.5))
+    tv.setTextColor_(NSColor.labelColor())
+    tv.setTextContainerInset_(NSMakeSize(10, 8))
+    scroll.setDocumentView_(tv)
+    box.contentView().addSubview_(scroll)
+    return box
+
+
+def _mail_fields(prop):
+    """(meta, body) for a mail proposal, else (None, None)."""
+    if str(prop.get("kind")) not in _MAIL_KINDS:
+        return None, None
+    args = (prop.get("payload") or {}).get("args") or {}
+    to = str(args.get("to") or "")
+    subject = str(args.get("subject") or "")
+    body = str(args.get("draft") or "")
+    meta = f"받는사람  {to}      제목  {subject}"
+    return meta, body
 
 
 class _NAPanel(NSPanel):
@@ -97,8 +184,8 @@ class ProposalPanelController(NSObject):
 
     # -- build ---------------------------------------------------------------
 
-    def _build(self):
-        rect = NSMakeRect(0, 0, _W, 200)
+    def _build_(self, height):
+        rect = NSMakeRect(0, 0, _W, height)
         self.panel = _NAPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             rect,
             NSWindowStyleMaskNonactivatingPanel | NSWindowStyleMaskBorderless,
@@ -114,15 +201,14 @@ class ProposalPanelController(NSObject):
 
         radius = float(self.config.get("panel_corner_radius"))
         if _Glass is not None and bool(self.config.get("glass_enabled")):
-            backdrop = _Glass.alloc().initWithFrame_(rect)
-            backdrop.setCornerRadius_(radius)
-            # a tint so the card reads as solid frosted glass, not stark white
-            backdrop.setTintColor_(
-                NSColor.windowBackgroundColor().colorWithAlphaComponent_(0.55))
+            glass = _Glass.alloc().initWithFrame_(rect)
+            glass.setCornerRadius_(radius)
+            glass.setStyle_(
+                1 if str(self.config.get("glass_style")) == "clear" else 0)
             host = NSView.alloc().initWithFrame_(rect)
             host.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-            backdrop.setContentView_(host)
-            self.panel.setContentView_(backdrop)
+            glass.setContentView_(host)
+            self.panel.setContentView_(glass)
         else:
             backdrop = NSVisualEffectView.alloc().initWithFrame_(rect)
             backdrop.setMaterial_(NSVisualEffectMaterialHUDWindow)
@@ -140,12 +226,24 @@ class ProposalPanelController(NSObject):
     def presentProposal_(self, prop):
         if not prop:
             return
-        if self.panel is None:
-            self._build()
         self.pid = prop.get("id")
-
         rationale = str(prop.get("rationale") or "").strip()
-        h = 206.0 if rationale else 158.0
+        meta, body = _mail_fields(prop)
+        has_body = bool(body)
+
+        # ---- compute height from the pieces (bottom-left origin) ----
+        h = _PAD                               # bottom inset
+        h += 36 + 16                           # buttons + gap
+        if has_body:
+            h += _BODY_H + 10                   # scrollable draft body + gap
+            h += 18 + 8                         # meta line (to/subject) + gap
+        h += (40 if rationale else 0) + (8 if rationale else 0)  # rationale
+        h += 48 + 12                           # title + gap
+        h += 24 + _PAD                         # header (badge/source) + top inset
+
+        # (re)build the panel at the right height — cheap, one card at a time
+        self._build_(h)
+
         screen = NSScreen.mainScreen()
         if screen is not None:
             vf = screen.visibleFrame()
@@ -153,61 +251,58 @@ class ProposalPanelController(NSObject):
             y = vf.origin.y + vf.size.height - h - 60
             self.panel.setFrame_display_(NSMakeRect(x, y, _W, h), True)
 
-        for sub in list(self.host.subviews()):
-            sub.removeFromSuperview()
         iw = _W - 2 * _PAD
-
         klass = str(prop.get("risk") or risk.NEVER_AUTO)
-        r, g, b = _RISK_COLOR.get(klass, _RISK_COLOR[risk.NEVER_AUTO])
-        badge = NSTextField.labelWithString_(f"  {klass.upper()}  ")
-        badge.setFont_(NSFont.boldSystemFontOfSize_(10.0))
-        badge.setTextColor_(NSColor.whiteColor())
-        badge.setBackgroundColor_(
-            NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0))
-        badge.setDrawsBackground_(True)
-        badge.setBezeled_(False)
-        badge.setAlignment_(NSTextAlignmentCenter)
-        badge.setWantsLayer_(True)
-        badge.layer().setCornerRadius_(9.0)
-        badge.layer().setMasksToBounds_(True)
-        badge.setFrame_(NSMakeRect(_PAD, h - _PAD - 18, 96, 18))
-        self.host.addSubview_(badge)
 
+        # cursor walks DOWN from the top (we have absolute height now)
+        top = h - _PAD - 24
+        self.host.addSubview_(_badge(klass, _PAD, top))
         src = NSTextField.labelWithString_(str(prop.get("source") or ""))
-        src.setFont_(NSFont.systemFontOfSize_(11.0))
+        src.setFont_(NSFont.systemFontOfSize_(11.5))
         src.setTextColor_(NSColor.tertiaryLabelColor())
-        src.setFrame_(NSMakeRect(_PAD + 104, h - _PAD - 17, iw - 104, 16))
+        src.setFrame_(NSMakeRect(_PAD + 88, top + 3, iw - 88, 16))
         self.host.addSubview_(src)
 
         title = NSTextField.wrappingLabelWithString_(str(prop.get("title") or ""))
-        title.setFont_(NSFont.boldSystemFontOfSize_(16.0))
-        title.setFrame_(NSMakeRect(_PAD, h - _PAD - 18 - 8 - 46, iw, 46))
+        title.setFont_(NSFont.boldSystemFontOfSize_(17.0))
+        title.setTextColor_(NSColor.labelColor())
+        title.setFrame_(NSMakeRect(_PAD, top - 12 - 48, iw, 48))
         self.host.addSubview_(title)
 
+        cursor = top - 12 - 48 - 8
         if rationale:
             rat = NSTextField.wrappingLabelWithString_(rationale)
-            rat.setFont_(NSFont.systemFontOfSize_(12.5))
+            rat.setFont_(NSFont.systemFontOfSize_(13.0))
             rat.setTextColor_(NSColor.secondaryLabelColor())
-            rat.setFrame_(NSMakeRect(_PAD, 66, iw, 40))
+            rat.setFrame_(NSMakeRect(_PAD, cursor - 40, iw, 40))
             self.host.addSubview_(rat)
+            cursor -= 40 + 8
 
+        if has_body:
+            ml = NSTextField.labelWithString_(meta)
+            ml.setFont_(NSFont.systemFontOfSize_(12.0))
+            ml.setTextColor_(NSColor.tertiaryLabelColor())
+            ml.setLineBreakMode_(0)            # clip; subject can be long
+            ml.setFrame_(NSMakeRect(_PAD, cursor - 18, iw, 16))
+            self.host.addSubview_(ml)
+            cursor -= 18 + 8
+            self.host.addSubview_(
+                _body_view(body, _PAD, cursor - _BODY_H, iw, _BODY_H))
+
+        # ---- buttons ----
         bw = (iw - 16) / 3.0
         accent = NSColor.controlAccentColor()
-        subtle = NSColor.labelColor().colorWithAlphaComponent_(0.10)
-        # M17: the 2nd-gesture send card relabels 승인 → 지금 보내기 (the explicit
-        # send), while the badge stays NEVER_AUTO red (set above from prop.risk).
-        approve_label = (t("assistant.send_now")
-                         if str(prop.get("kind")) == "send_reply"
-                         else t("assistant.approve"))
+        send = str(prop.get("kind")) == "send_reply"
+        approve_label = t("assistant.send_now") if send else t("assistant.approve")
         self.host.addSubview_(_pill(
             self, approve_label, "approveClicked:",
-            _PAD, 18, bw, 34, accent, NSColor.whiteColor()))
+            _PAD, _PAD, bw, 36, accent, NSColor.whiteColor()))
         self.host.addSubview_(_pill(
             self, t("assistant.skip"), "skipClicked:",
-            _PAD + bw + 8, 18, bw, 34, subtle, NSColor.labelColor()))
+            _PAD + bw + 8, _PAD, bw, 36, None, NSColor.labelColor()))
         self.host.addSubview_(_pill(
             self, t("assistant.snooze"), "snoozeClicked:",
-            _PAD + 2 * (bw + 8), 18, bw, 34, subtle, NSColor.labelColor()))
+            _PAD + 2 * (bw + 8), _PAD, bw, 36, None, NSColor.labelColor()))
 
         self.panel.orderFrontRegardless()  # never makeKeyAndOrderFront
 
