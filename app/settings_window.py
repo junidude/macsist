@@ -56,7 +56,7 @@ from PyObjCTools import AppHelper
 import i18n
 import keychain
 from i18n import t
-from config import DEFAULTS
+from config import CALENDAR_ICS_ACCOUNT, DEFAULTS
 from hotkeys import format_binding
 from ui_kit import FlippedView, make_pill, make_round_field
 
@@ -192,6 +192,12 @@ class SettingsPaneController(NSObject):
         self.gmail_status_label = None
         self.gmail_interval_field = None
         self.gmail_filter_field = None
+        # Calendar (M18)
+        self.calendar_enabled_switch = None
+        self.calendar_status_label = None
+        self.calendar_url_field = None
+        self.calendar_lead_field = None
+        self.calendar_conflict_switch = None
         self.on_saved = None  # set by main.py: hotkey reload + panel rebuild
         self.on_record_changed = None  # set by main.py: pause hotkeys while recording
         self._hotkey_bindings = {}  # config key -> pynput format, saved on Save
@@ -293,6 +299,14 @@ class SettingsPaneController(NSObject):
             str(self.config.get("gmail_query_filter"))
         )
         self._refreshGmailStatus()
+        self.calendar_enabled_switch.setState_(
+            1 if self.config.get("calendar_enabled") else 0)
+        self.calendar_lead_field.setStringValue_(
+            str(int(self.config.get("calendar_alert_lead_min"))))
+        self.calendar_conflict_switch.setState_(
+            1 if self.config.get("calendar_conflict_enabled") else 0)
+        self.calendar_url_field.setStringValue_("")  # never display the secret URL
+        self._refreshCalendarStatus()
         self.status_label.setTextColor_(NSColor.secondaryLabelColor())
         self.status_label.setStringValue_("")
         print("settings pane refreshed", flush=True)
@@ -433,6 +447,20 @@ class SettingsPaneController(NSObject):
                 t("settings.gmail_not_connected"))
             self.gmail_status_label.setTextColor_(
                 NSColor.secondaryLabelColor())
+
+    def _refreshCalendarStatus(self):
+        from assistant.calendar_ics import is_connected
+        try:
+            connected = is_connected()
+        except Exception:
+            connected = False
+        # reuse the generic 연결됨/연결 안 됨 strings
+        self.calendar_status_label.setStringValue_(
+            t("settings.gmail_connected") if connected
+            else t("settings.gmail_not_connected"))
+        self.calendar_status_label.setTextColor_(
+            NSColor.systemGreenColor() if connected
+            else NSColor.secondaryLabelColor())
 
     # -- build (Codex-style sections + cards) -----------------------------------
 
@@ -758,6 +786,47 @@ class SettingsPaneController(NSObject):
               gmail_interval_row, gmail_filter_row])
         self.gmail_interval_field = gmail_interval_holder["field"]
         self.gmail_filter_field = gmail_filter_holder["field"]
+
+        # ---- Calendar (M18) ----
+        section(t("settings.section_calendar"))
+
+        def build_cal_enable(inner, row_y):
+            titled(inner, row_y, t("settings.calendar_title"),
+                   t("settings.calendar_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.calendar_enabled_switch = switch
+
+        cal_url_holder = {}
+
+        def build_cal_url(inner, row_y):
+            # status in the desc sub-label (M9 key-row pattern); the secret URL
+            # is pasted into the full-width field below and never displayed back.
+            self.calendar_status_label = titled(
+                inner, row_y, t("settings.calendar_url_title"),
+                t("settings.calendar_url_desc"))
+            box, field = make_round_field(
+                NSMakeRect(ROW_PAD_X, row_y + 58, card_w - 2 * ROW_PAD_X, 34),
+                FONT_FIELD)
+            field.setPlaceholderString_(t("settings.calendar_url_placeholder"))
+            inner.addSubview_(box)
+            cal_url_holder["field"] = field
+
+        cal_lead_holder, cal_lead_row = field_row(
+            t("settings.calendar_lead_title"),
+            t("settings.calendar_lead_desc"), w=120)
+
+        def build_cal_conflict(inner, row_y):
+            titled(inner, row_y, t("settings.calendar_conflict_title"),
+                   t("settings.calendar_conflict_desc"))
+            switch = NSSwitch.alloc().initWithFrame_(control_frame(row_y, 42, 25))
+            inner.addSubview_(switch)
+            self.calendar_conflict_switch = switch
+
+        card([(ROW_H, build_cal_enable), (INPUT_ROW_H, build_cal_url),
+              cal_lead_row, (ROW_H, build_cal_conflict)])
+        self.calendar_url_field = cal_url_holder["field"]
+        self.calendar_lead_field = cal_lead_holder["field"]
 
         # ---- 단축키 ----
         section(t("settings.section_hotkeys"))
@@ -1228,6 +1297,22 @@ class SettingsPaneController(NSObject):
         gfilter = str(self.gmail_filter_field.stringValue()).strip()
         if gfilter:
             self.config.set("gmail_query_filter", gfilter)
+        # Calendar (M18)
+        self.config.set("calendar_enabled",
+                        bool(self.calendar_enabled_switch.state()))
+        self.config.set("calendar_conflict_enabled",
+                        bool(self.calendar_conflict_switch.state()))
+        try:
+            self.config.set("calendar_alert_lead_min",
+                            int(float(self.calendar_lead_field.stringValue())))
+        except (ValueError, TypeError):
+            pass
+        cal_url = str(self.calendar_url_field.stringValue()).strip()
+        if cal_url:  # paste-to-set; the secret URL lives in the Keychain
+            try:
+                keychain.set_key(CALENDAR_ICS_ACCOUNT, cal_url)
+            except keychain.KeychainError as err:
+                print(f"settings: calendar URL keychain error {err}", flush=True)
         # 창 모양
         self.config.set("window_glass_enabled",
                         bool(self.window_glass_switch.state()))

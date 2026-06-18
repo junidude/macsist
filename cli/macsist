@@ -234,6 +234,19 @@ cmd_gmail() {  # M17: Gmail status / connect / sync
     esac
 }
 
+cmd_calendar() {  # M18: Calendar status / sync
+    local sub="${1:-status}"
+    case "$sub" in
+        status)
+            "$(pybin)" "$CONFIGURE" calendar-status \
+                || { echo "캘린더 상태를 읽을 수 없습니다"; return 1; } ;;
+        sync)
+            post_notification "com.macsist.assistant.calendarSync"
+            echo "캘린더 새로고침을 요청했습니다." ;;
+        *) echo "사용법: macsist calendar status|sync" >&2; return 2 ;;
+    esac
+}
+
 cmd_tg() {  # M15: send a test message to Telegram via Hermes (no app/gateway needed)
     local text="$*"
     [[ -n "$text" ]] || { echo "사용법: macsist tg \"<메시지>\"" >&2; return 2; }
@@ -381,6 +394,17 @@ cmd_doctor() {
     [[ "$GM_ON" == 1 ]] && echo "  · gmail_enabled=on (폴링 활성)" \
                         || echo "  · gmail_enabled=off (Settings에서 켜기)"
 
+    echo "[Calendar (M18)]"
+    local CAL_ON
+    CAL_ON="$("$(pybin)" -c "import json,os; d=json.load(open(os.path.expanduser('$CONFIG_JSON'))); print(1 if d.get('calendar_enabled') else 0)" 2>/dev/null)"
+    if security find-generic-password -s com.macsist -a calendar.ics.primary -w >/dev/null 2>&1; then
+        echo "  $C_OK 캘린더 연결됨 (Keychain ICS URL 존재)"
+    else
+        echo "  $C_WARN 캘린더 미연결 — Settings → Calendar 에 비공개 iCal 주소 붙여넣기"
+    fi
+    [[ "$CAL_ON" == 1 ]] && echo "  · calendar_enabled=on (폴링 활성)" \
+                         || echo "  · calendar_enabled=off (Settings에서 켜기)"
+
     echo
     if [[ "$fails" == 0 ]]; then
         echo "모든 핵심 점검 통과 ✨"
@@ -421,6 +445,7 @@ case "${1:-__default__}" in
     approve) shift; cmd_approve "${1:-}" ;;
     scan)    cmd_scan ;;
     gmail)   shift; cmd_gmail "$@" ;;
+    calendar) shift; cmd_calendar "$@" ;;
     tg)      shift; cmd_tg "$@" ;;
     doctor)  cmd_doctor ;;
     update)  cmd_update ;;

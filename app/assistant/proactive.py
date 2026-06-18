@@ -291,7 +291,11 @@ class ProactiveEngine:
             if self.on_gmail_send is not None:
                 return self.on_gmail_send(prop)             # -> DEFERRED
             return self.gmail.send_draft(payload_args(prop))
-        # No executor for this kind yet (calendar_*/…).
+        if kind == "calendar_alert":
+            # M18: an informational deterministic alert. "Executing" = the user
+            # acknowledged it (확인). No side effect — just records the event key.
+            return payload_args(prop).get("key")
+        # No executor for this kind yet (calendar_write/delete/…).
         raise NotImplementedError(f"executor for kind '{kind}' arrives later")
 
     def emit_send_reply(self, reply_prop, draft_id):

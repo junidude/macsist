@@ -18,6 +18,7 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # under these; cli/configure.py reads them. Change here, reflected everywhere.
 GMAIL_OAUTH_CLIENT_ACCOUNT = "gmail.oauth.client"    # client_id/secret (JSON)
 GMAIL_OAUTH_REFRESH_ACCOUNT = "gmail.oauth.refresh"  # long-lived refresh token
+CALENDAR_ICS_ACCOUNT = "calendar.ics.primary"        # M18 Google secret iCal URL
 
 
 def asset_dir() -> Path:
@@ -219,6 +220,17 @@ DEFAULTS = {
     # i18n.prompt_default (see _LANG_KEYS): gmail_triage_system/_user,
     # gmail_revise_system/_user. The draft itself is written in the email's
     # language; title/rationale follow the configured UI language.
+    # ── M18 Calendar (read-only ICS; deterministic imminent/conflict alerts) ─
+    "calendar_enabled": False,              # opt-in poller (OFF by default)
+    "calendar_sources": [],                 # later: multi-source; MVP = the
+                                            # single Keychain ICS (decision #7)
+    "calendar_poll_interval_sec": 900,      # refetch the ICS this often (ETag)
+    "calendar_monitor_tick_sec": 60.0,      # evaluate imminent alerts this often
+    "calendar_window_days": 7,              # how far ahead to keep events
+    "calendar_alert_lead_min": 15,          # "N분 후" imminent threshold
+    "calendar_conflict_enabled": True,      # alert on cross-source double-booking
+    "calendar_telegram_when_away": True,    # mirror alerts to Telegram when away
+    "gcal_oauth_enabled": False,            # later: Google OAuth API path
 }
 
 

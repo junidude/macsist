@@ -331,8 +331,13 @@ class ProposalPanelController(NSObject):
         # ---- buttons ----
         bw = (iw - 16) / 3.0
         accent = NSColor.controlAccentColor()
-        send = str(prop.get("kind")) == "send_reply"
-        approve_label = t("assistant.send_now") if send else t("assistant.approve")
+        kind = str(prop.get("kind"))
+        if kind == "send_reply":
+            approve_label = t("assistant.send_now")       # the 2nd-gesture send
+        elif kind == "calendar_alert":
+            approve_label = t("assistant.acknowledge")    # informational: dismiss
+        else:
+            approve_label = t("assistant.approve")
         self.host.addSubview_(_pill(
             self, approve_label, "approveClicked:",
             _PAD, _PAD, bw, 36, accent, NSColor.whiteColor()))

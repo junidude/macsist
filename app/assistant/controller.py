@@ -19,6 +19,7 @@ from assistant.monitor import (
     ProactiveMonitor,
     RemoteJobMonitor,
 )
+from assistant.calendar_monitor import CalendarMonitor
 from assistant.gmail_monitor import GmailMonitor
 from assistant.gmail_triage import GmailTriager
 from assistant.proactive import DEFERRED, ProactiveEngine
@@ -27,6 +28,15 @@ from assistant.remote_exec import RemoteAgentExecutor, RemoteJobStore
 from assistant.thread_store import ThreadStore
 from i18n import t
 from text_capture import capture_selected_text
+
+
+def _hm_iso(iso):
+    """An ISO timestamp → 'HH:MM' for display (empty on bad input)."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(iso).strftime("%H:%M")
+    except (ValueError, TypeError):
+        return ""
 
 
 class AssistantController:
@@ -62,6 +72,9 @@ class AssistantController:
         # the draft/send network calls run off the main thread (panel click)
         self.engine.on_gmail_draft = self._draftGmail
         self.engine.on_gmail_send = self._sendGmail
+        # M18: Calendar — deterministic imminent/conflict alerts (OFF by default)
+        self.calendar_monitor = CalendarMonitor(
+            config, on_alert=self._onCalendarAlert)
         # lazy panel (built on first surface) — avoids touching AppKit if unused
         self._panel = None
         # let the window read the board + stores directly
@@ -81,6 +94,7 @@ class AssistantController:
         self.proactive_monitor.start()
         self.remote_monitor.start()
         self.gmail_monitor.start()
+        self.calendar_monitor.start()
         self._refresh()
 
     # == board / badge (main thread) =========================================
@@ -382,6 +396,37 @@ class AssistantController:
         except Exception as exc:
             print(f"gmail: connect failed {exc!r}", flush=True)
         AppHelper.callAfter(self._refresh)
+
+    # == Calendar (M18) ======================================================
+
+    def _onCalendarAlert(self, alert):
+        """Main thread: a deterministic imminent/conflict alert → surface as a
+        calendar_alert proposal (panel + badge + Telegram-when-away via the
+        normal pipeline). Deduped by the proposal idempotency key (alert['key'])
+        so a restart won't re-alert."""
+        if alert.get("kind") == "imminent":
+            title = t("assistant.cal_imminent_title").format(
+                mins=alert.get("mins", 0), summary=alert.get("summary", ""))
+            rationale = t("assistant.cal_imminent_rationale").format(
+                time=_hm_iso(alert.get("start")))
+            loc = alert.get("location") or ""
+            if loc:
+                rationale += f" · {loc}"
+        else:  # conflict
+            title = t("assistant.cal_conflict_title").format(
+                summary=alert.get("summary", ""))
+            rationale = t("assistant.cal_conflict_rationale").format(
+                a_summary=alert.get("a_summary", ""), a_time=alert.get("a_time", ""),
+                b_summary=alert.get("b_summary", ""), b_time=alert.get("b_time", ""))
+        self.engine.propose(
+            kind="calendar_alert", title=title, rationale=rationale,
+            source="calendar", source_ref=alert.get("key"),
+            payload={"action": "none", "args": alert})
+        self._refresh()
+
+    def syncCalendar(self):
+        """`macsist calendar sync`: refetch + evaluate now."""
+        self.calendar_monitor.poke()
 
     def showInbox(self):
         self.main_window.showAssistant()

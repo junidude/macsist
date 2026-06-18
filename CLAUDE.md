@@ -31,7 +31,7 @@ switching; M12: real signed **Macsist.app** bundle — py2app standalone build
 unusable), fixed self-signed "Macsist Signing" identity so TCC survives every
 redeploy, installed at `…/Application Support/Macsist/Macsist.app`, launchd
 runs the bundle executable — as-built notes in `docs/SPEC.md` §5.5–5.8).
-**M13–M17 shipped** — the **Assistant** subsystem (`app/assistant/`): M13
+**M13–M18 shipped** — the **Assistant** subsystem (`app/assistant/`): M13
 read-only kanban cockpit over Hermes (`hermes_bridge` = RO `~/.hermes/kanban.db`
 + `hermes` CLI, never writes the DB) + 작업 tab + menu-bar badge; M14
 propose-then-confirm engine (local M9 brain, zero Hermes-gateway dependency) —
@@ -43,8 +43,12 @@ delivery (away/quiet-hours via `hermes send`); M16 remote agent delegation
 REST + Keychain loopback-PKCE OAuth + LLM triage → reply-draft proposals, OFF by
 default; **two-step send** — approve→Gmail DRAFT, explicit "지금 보내기"→`drafts.send`,
 never auto; Settings "Gmail" card, `macsist gmail`, needs a user-supplied GCP
-Desktop OAuth client JSON). Full design + the M18 Calendar roadmap:
-**`docs/ASSISTANT.md`**.
+Desktop OAuth client JSON); M18 **Calendar** (read-only ICS: dependency-free
+RFC-5545 parser + zoneinfo, `calendar_unify` pure functions, `CalendarMonitor`
+clone — deterministic imminent/conflict alerts (no LLM) surfaced as
+`calendar_alert` proposals through the existing panel/badge/Telegram pipeline,
+OFF by default; Google private secret-iCal URL in Keychain via the Settings
+"Calendar" card, `macsist calendar`). Full design: **`docs/ASSISTANT.md`**.
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit

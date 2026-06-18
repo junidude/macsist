@@ -256,6 +256,26 @@ def cmd_gmail_status(args):
     })
 
 
+def cmd_calendar_status(args):
+    """M18: Calendar connection summary (Keychain ICS-URL presence + config)."""
+    try:
+        store = ConfigStore()
+    except Exception as exc:
+        return _emit({"error": str(exc)}, ok=False)
+    try:
+        from config import CALENDAR_ICS_ACCOUNT
+        connected = bool(keychain.get_key(CALENDAR_ICS_ACCOUNT))
+    except keychain.KeychainError:
+        connected = False
+    return _emit({
+        "enabled": bool(store.get("calendar_enabled")),
+        "connected": connected,
+        "lead_min": store.get("calendar_alert_lead_min"),
+        "window_days": store.get("calendar_window_days"),
+        "conflict": bool(store.get("calendar_conflict_enabled")),
+    })
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -288,6 +308,7 @@ def main():
     p.add_argument("--json", action="store_true")
 
     sub.add_parser("gmail-status")
+    sub.add_parser("calendar-status")
 
     args = parser.parse_args()
     handler = {
@@ -299,6 +320,7 @@ def main():
         "tasks": cmd_tasks,
         "inbox": cmd_inbox,
         "gmail-status": cmd_gmail_status,
+        "calendar-status": cmd_calendar_status,
     }[args.cmd]
     sys.exit(handler(args))
 

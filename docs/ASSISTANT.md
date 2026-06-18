@@ -493,10 +493,18 @@ result_panel) 최대 재사용. **모든 마일스톤은 Hermes 게이트웨이 
   렌더, 크래시 0)·CLI 모두 통과. **실제 받은편지함 E2E는 GCP 클라이언트 JSON 주입 후** (현재 빈 파일
   → doctor 경고). later: 원클릭 전송, Telegram 회신, 멀티계정.
 
-### M18 — Calendar (ICS) (~1주)
+### M18 — Calendar (ICS) (~1주) — ✅ 출시 (2026-06-18)
 - **목표:** TimeTree+Google 통합 + "N분 후 일정" 깨우기.
-- **출시:** §6.5 MVP cut. **OAuth ZERO.**
-- **검수:** 두 소스 이벤트가 한 번씩 등장; 더블부킹이 conflict 알림; 15분 전 imminent 발화.
+- **출시:** §6.5 MVP cut. **OAuth ZERO.** `calendar_ics.py`(httpx + ETag/304 + 무의존성
+  RFC-5545 파서 + zoneinfo + 윈도우 내 반복 전개), `calendar_unify.py`(normalize/merge_dedup/
+  imminent/conflict_pairs/event_key 순수함수), `calendar_monitor.py`(monitor 클론, 빠른 틱 +
+  ETag 재fetch, snapshot atomic, `alerted{key}` once-per-event dedup). 알림은 **결정론 앱사이드**
+  (LLM 0) → `calendar_alert`(risk=auto) 제안으로 표면(글래스 패널 "확인" + 배지 + away면 Telegram).
+  ICS 비밀 URL은 Keychain(`calendar.ics.primary`), Settings "Calendar" 카드에 붙여넣기.
+  `macsist calendar status|sync` + doctor.
+- **검수:** 파서/unify 단위테스트(timed/all-day/주간·일간 반복/충돌/imminent/dedup) 통과,
+  calendar_alert propose→확인→executed(noop, 감사), GUI 빌드(Settings 카드 + 알림 카드 렌더,
+  크래시 0), CLI/doctor 통과. **실제 캘린더 E2E는 비공개 iCal URL 주입 후.**
 - later: Google OAuth API 경로 + 캘린더 쓰기(confirm), 자동 prep 제안.
 
 ### later / optional (M18+)
@@ -602,7 +610,7 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
 파이프는 올바르며 도달 가능한 망에서 `macsist tg "..."`로 검증할 것.
 
 ### A.6 출시 마일스톤 상태
-- **M13·M14·M15·M16 출시 (2026-06-16). M17 Gmail 출시 (2026-06-17).**
+- **M13·M14·M15·M16 출시 (2026-06-16). M17 Gmail 출시 (2026-06-17). M18 Calendar 출시 (2026-06-18).**
 - **M16 원격 위임**: `remote_exec.py`로 nhn-container에 `codex exec`를 detached tmux로
   디스패치(prompt stdin, `-o result.txt`, exit_code 센티넬), `RemoteJobMonitor`가 폴링,
   완료 시 결과를 할 일 스레드로 + away면 Telegram. SSH는 `~/.ssh/config` IdentityFile(ssh-agent
@@ -621,4 +629,12 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
   Gmail 점검. **GCP Desktop OAuth 클라이언트 JSON은 사용자 제공**(`tokens_and_keys/gcp-gmail-api.key`,
   git-ignored); 비어 있으면 doctor가 경고 — 실제 받은편지함 E2E 검증은 키 주입 후. later: 원클릭
   전송, Telegram 회신, 멀티계정.
-- 남은 것: M18 Calendar. Telegram 봇 API 도달성은 환경 의존(차단 시 네이티브만).
+- **M18 Calendar**: 읽기전용 ICS 커넥터. `calendar_ics.py`(httpx ETag/304 + 무의존성 RFC-5545
+  파서 + zoneinfo + 윈도우 내 DAILY/WEEKLY/MONTHLY 반복 전개), `calendar_unify.py`(순수함수:
+  merge_dedup/imminent/conflict_pairs/event_key), `calendar_monitor.py`(monitor 클론, 빠른 틱 +
+  ETag 재fetch + snapshot atomic + `alerted{key}` once-per-event). 알림은 **LLM 0 결정론** →
+  `calendar_alert`(auto) 제안으로 기존 패널/배지/Telegram 파이프라인 재사용("확인" 단일 제스처).
+  비밀 iCal URL은 Keychain(`config.CALENDAR_ICS_ACCOUNT`), Settings "Calendar" 카드 붙여넣기.
+  결정#7대로 Google 비공개 ICS 단일 소스(TimeTree는 Google 동기화). later: 멀티소스, Google OAuth
+  API, 캘린더 쓰기(confirm)+자동 prep, 진짜 Notification Center 전송.
+- **M13–M18 전 마일스톤 출시 완료.** Telegram 봇 API 도달성은 환경 의존(차단 시 네이티브만).

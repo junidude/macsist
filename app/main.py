@@ -111,6 +111,11 @@ class _RemoteCommandRelay(NSObject):
         if self._assistant is not None:
             self._assistant.syncGmail()
 
+    def remoteAssistantCalendarSync_(self, note):
+        print("remote: assistant.calendarSync", flush=True)
+        if self._assistant is not None:
+            self._assistant.syncCalendar()
+
 
 class _UIAuditor(NSObject):
     """HE_DEBUG_UI_AUDIT=<sec>: repeating structured dump of the panel and
@@ -350,6 +355,7 @@ def main():
         ("inbox", "remoteAssistantInbox:"),
         ("gmailConnect", "remoteAssistantGmailConnect:"),
         ("gmailSync", "remoteAssistantGmailSync:"),
+        ("calendarSync", "remoteAssistantCalendarSync:"),
     ):
         dist_center.addObserver_selector_name_object_(
             _remote_relay, _sel, f"com.macsist.assistant.{_name}", None
