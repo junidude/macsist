@@ -46,7 +46,7 @@ from AppKit import (
     NSWindowStyleMaskNonactivatingPanel,
 )
 from Foundation import NSAttributedString, NSMakeRect, NSObject
-from ui_kit import PillButton
+from ui_kit import PillButton, handle_edit_key_equivalent, make_round_field
 
 from assistant import risk
 from i18n import t
@@ -164,11 +164,20 @@ def _mail_fields(prop):
 
 
 class _NAPanel(NSPanel):
+    _allow_key = False  # set True only while a mail card's revise field is live
+
     def canBecomeKeyWindow(self):
-        return False
+        return bool(self._allow_key)
 
     def canBecomeMainWindow(self):
         return False
+
+    def performKeyEquivalent_(self, event):
+        # while the revise field is focused the panel is key, so ⌘A/C/V/X/Z land
+        # here with no Edit menu to dispatch them (ui_kit handles it).
+        if handle_edit_key_equivalent(self, event):
+            return True
+        return objc.super(_NAPanel, self).performKeyEquivalent_(event)
 
 
 class ProposalPanelController(NSObject):
@@ -181,12 +190,19 @@ class ProposalPanelController(NSObject):
         self.panel = None
         self.host = None
         self.pid = None
+        self.revise_field = None
+        self.revise_button = None
         return self
 
     # -- build ---------------------------------------------------------------
 
-    def _build_(self, height):
-        rect = NSMakeRect(0, 0, _W, height)
+    def _ensurePanel(self):
+        """Build the single reused panel once. Rebuilding per-present leaked a
+        window each time (it stayed on screen) — the panel is reused and only
+        resized/repopulated on each present."""
+        if self.panel is not None:
+            return
+        rect = NSMakeRect(0, 0, _W, 240)
         self.panel = _NAPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             rect,
             NSWindowStyleMaskNonactivatingPanel | NSWindowStyleMaskBorderless,
@@ -236,22 +252,30 @@ class ProposalPanelController(NSObject):
         h = _PAD                               # bottom inset
         h += 36 + 16                           # buttons + gap
         if has_body:
+            h += 34 + 14                        # AI-revise input row + gap
             h += _BODY_H + 10                   # scrollable draft body + gap
             h += 18 + 8                         # meta line (to/subject) + gap
         h += (40 if rationale else 0) + (8 if rationale else 0)  # rationale
         h += 48 + 12                           # title + gap
         h += 24 + _PAD                         # header (badge/source) + top inset
 
-        # (re)build the panel at the right height — cheap, one card at a time
-        self._build_(h)
-
+        # reuse the single panel; resize it to fit this card's height
+        self._ensurePanel()
+        self.revise_field = None
+        self.revise_button = None
+        self._dropKey()                        # clean focus state for this card
         screen = NSScreen.mainScreen()
         if screen is not None:
             vf = screen.visibleFrame()
             x = vf.origin.x + (vf.size.width - _W) / 2.0
             y = vf.origin.y + vf.size.height - h - 60
             self.panel.setFrame_display_(NSMakeRect(x, y, _W, h), True)
+        else:
+            self.panel.setContentSize_(NSMakeSize(_W, h))
 
+        # clear the previous card's content before drawing this one
+        for sub in list(self.host.subviews()):
+            sub.removeFromSuperview()
         iw = _W - 2 * _PAD
         klass = str(prop.get("risk") or risk.NEVER_AUTO)
 
@@ -289,6 +313,20 @@ class ProposalPanelController(NSObject):
             cursor -= 18 + 8
             self.host.addSubview_(
                 _body_view(body, _PAD, cursor - _BODY_H, iw, _BODY_H))
+            cursor -= _BODY_H + 14
+            # ---- AI revise row: instruction field + "AI 수정" button ----
+            ry = cursor - 34
+            fbox, field = make_round_field(
+                NSMakeRect(_PAD, ry, iw - 112, 34), 13.0)
+            field.setTarget_(self)
+            field.setAction_("reviseSubmit:")
+            field.setPlaceholderString_(t("assistant.revise_placeholder"))
+            self.host.addSubview_(fbox)
+            self.revise_field = field
+            rbtn = _pill(self, t("assistant.revise_button"), "reviseSubmit:",
+                        _PAD + iw - 104, ry, 104, 34, None, NSColor.labelColor())
+            self.host.addSubview_(rbtn)
+            self.revise_button = rbtn
 
         # ---- buttons ----
         bw = (iw - 16) / 3.0
@@ -305,21 +343,58 @@ class ProposalPanelController(NSObject):
             self, t("assistant.snooze"), "snoozeClicked:",
             _PAD + 2 * (bw + 8), _PAD, bw, 36, None, NSColor.labelColor()))
 
+        # mail cards may become key (only) when the user clicks the revise field
+        self.panel._allow_key = has_body
         self.panel.orderFrontRegardless()  # never makeKeyAndOrderFront
+
+    def presentRevised_(self, prop):
+        """Re-show a card after an AI revision (controller calls this)."""
+        self.presentProposal_(prop)
+
+    # -- focus gate (M6: key only while the revise field is live) -------------
+
+    def _dropKey(self):
+        if self.panel is None:
+            return
+        self.panel.makeFirstResponder_(None)
+        if self.panel.isKeyWindow():
+            # leave the screen list so the window server re-keys the source app
+            self.panel.orderOut_(None)
+            self.panel.orderFrontRegardless()
+        self.panel._allow_key = False
 
     # -- actions -------------------------------------------------------------
 
+    def reviseSubmit_(self, sender):
+        """Send the typed instruction to the AI to rewrite the draft, then the
+        controller re-presents the card (presentRevised_)."""
+        field = getattr(self, "revise_field", None)
+        if field is None or not self.pid:
+            return
+        text = str(field.stringValue()).strip()
+        if not text:
+            return
+        self._dropKey()                        # hand the keyboard back
+        button = getattr(self, "revise_button", None)
+        if button is not None:
+            button.setEnabled_(False)
+        field.setEnabled_(False)
+        self.owner.reviseDraft(self.pid, text)
+
     def approveClicked_(self, sender):
+        self._dropKey()
         if self.pid:
             self.owner.approve(self.pid)
         self._advance()
 
     def skipClicked_(self, sender):
+        self._dropKey()
         if self.pid:
             self.owner.skip(self.pid)
         self._advance()
 
     def snoozeClicked_(self, sender):
+        self._dropKey()
         if self.pid:
             self.owner.snooze(self.pid)
         self._advance()
@@ -332,4 +407,5 @@ class ProposalPanelController(NSObject):
             self.presentProposal_(pending[0])
         elif self.panel is not None:
             self.pid = None
+            self.panel._allow_key = False
             self.panel.orderOut_(None)

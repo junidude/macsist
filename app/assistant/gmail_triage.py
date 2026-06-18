@@ -107,6 +107,32 @@ class GmailTriager:
                 f"Preview: {m.get('snippet', '')[:200]}")
         return "\n".join(lines)[:cap]
 
+    def revise(self, draft, instruction, subject=""):
+        """Rewrite `draft` per a free-text `instruction` (panel Edit&Approve).
+        Uses the same privacy-aware LLM as triage. Returns the new body, or None
+        if the LLM is unavailable / empty (caller keeps the old draft)."""
+        instruction = str(instruction or "").strip()
+        if not instruction:
+            return None
+        system = str(self.config.get("gmail_revise_system"))
+        user = (str(self.config.get("gmail_revise_user"))
+                .replace("<<SUBJECT>>", str(subject or ""))
+                .replace("<<DRAFT>>", str(draft or ""))
+                .replace("<<INSTRUCTION>>", instruction))
+        model = str(self.config.get("assistant_model")) or None
+        buf = []
+        try:
+            for chunk in self.llm.stream_chat(
+                    [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
+                    StreamHandle(), model=model):
+                buf.append(chunk)
+        except LLMError as exc:
+            print(f"gmail revise: LLM unavailable ({exc})", flush=True)
+            return None
+        text = "".join(buf).strip()
+        return text or None
+
     def _llm_pick(self, digest):
         system = str(self.config.get("gmail_triage_system"))
         user = str(self.config.get("gmail_triage_user")).replace(

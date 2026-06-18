@@ -323,6 +323,40 @@ class AssistantController:
                     f"📧 [메일 전송] {subject}\n받는사람: {args.get('to', '')}")
         self._refresh()
 
+    def reviseDraft(self, pid, instruction):
+        """Panel Edit&Approve: revise a reply_draft/send_reply's body per a
+        free-text instruction on a worker thread (LLM), then re-present the card
+        for re-confirmation. Returns nothing — the panel updates async."""
+        prop = self.proposals.get(pid)
+        if prop is None or str(prop.get("kind")) not in ("reply_draft",
+                                                         "send_reply"):
+            return
+        threading.Thread(target=self._reviseWorker, args=(pid, instruction),
+                        daemon=True, name="gmail-revise").start()
+
+    def _reviseWorker(self, pid, instruction):
+        prop = self.proposals.get(pid)
+        args = (prop.get("payload") or {}).get("args") or {}
+        new_draft = self.gmail_triager.revise(
+            args.get("draft", ""), instruction, args.get("subject", ""))
+        AppHelper.callAfter(self._reviseDone, pid, new_draft)
+
+    def _reviseDone(self, pid, new_draft):
+        prop = self.proposals.get(pid)
+        if prop is not None and new_draft:
+            payload = dict(prop.get("payload") or {})
+            args = dict(payload.get("args") or {})
+            args["draft"] = new_draft
+            payload["args"] = args
+            self.proposals.update(pid, payload=payload)
+            prop = self.proposals.get(pid)
+        # re-present the (possibly updated) card for another look
+        try:
+            self._panel_controller().presentRevised_(prop)
+        except Exception as exc:
+            print(f"assistant: revise re-present error {exc!r}", flush=True)
+        self._refresh()
+
     def syncGmail(self):
         """`macsist gmail sync`: run one inbox poll now."""
         self.gmail_monitor.poke()

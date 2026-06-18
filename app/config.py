@@ -223,6 +223,16 @@ DEFAULTS = {
         "\"draft\": \"답장 본문\"} 형식이다. 답장할 메일이 없으면 []."
     ),
     "gmail_triage_user": "받은 편지함:\n<<DIGEST>>",
+    # Revise an existing draft per a free-text user instruction (panel Edit&Approve).
+    "gmail_revise_system": (
+        "기존 이메일 답장 초안과 사용자의 수정 지시가 주어진다. 지시를 충실히 "
+        "반영해 초안을 다시 작성하라. 초안 본문만 출력하고, 머리말·꼬리말·설명·"
+        "따옴표는 절대 붙이지 마라. 반드시 원래 초안과 같은 언어로 작성하라."
+    ),
+    "gmail_revise_user": (
+        "제목: <<SUBJECT>>\n\n기존 초안:\n<<DRAFT>>\n\n"
+        "수정 지시: <<INSTRUCTION>>\n\n수정된 초안 본문만 출력:"
+    ),
 }
 
 
