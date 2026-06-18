@@ -210,29 +210,10 @@ DEFAULTS = {
     # client_id/secret live in the Keychain (gmail.oauth.client) — never config.
     "gmail_client_json_path":
         "~/Documents/macsist/tokens_and_keys/gcp-gmail-api.key",
-    # Triage prompts (single default; the model is told to reply in the email's
-    # own language). Tunable like every other prompt — hard rule: no hardcoding.
-    "gmail_triage_system": (
-        "너는 사용자의 받은 편지함을 분류하는 비서다. 아래 메일 목록(보낸이/제목/"
-        "미리보기)을 보고, 사용자가 '직접 답장해야 하는' 메일을 최대 2건만 고른다. "
-        "광고/뉴스레터/자동알림/단순공지는 절대 고르지 마라. 고른 각 메일에 대해 "
-        "정중하고 간결한 답장 초안을 메일과 같은 언어로 작성한다. 반드시 JSON "
-        "배열만 출력하고 다른 말은 쓰지 마라. 각 항목은 "
-        "{\"msg_id\": \"...\", \"title\": \"한 줄 요약\", "
-        "\"rationale\": \"왜 답장이 필요한지 한 문장\", "
-        "\"draft\": \"답장 본문\"} 형식이다. 답장할 메일이 없으면 []."
-    ),
-    "gmail_triage_user": "받은 편지함:\n<<DIGEST>>",
-    # Revise an existing draft per a free-text user instruction (panel Edit&Approve).
-    "gmail_revise_system": (
-        "기존 이메일 답장 초안과 사용자의 수정 지시가 주어진다. 지시를 충실히 "
-        "반영해 초안을 다시 작성하라. 초안 본문만 출력하고, 머리말·꼬리말·설명·"
-        "따옴표는 절대 붙이지 마라. 반드시 원래 초안과 같은 언어로 작성하라."
-    ),
-    "gmail_revise_user": (
-        "제목: <<SUBJECT>>\n\n기존 초안:\n<<DRAFT>>\n\n"
-        "수정 지시: <<INSTRUCTION>>\n\n수정된 초안 본문만 출력:"
-    ),
+    # Gmail triage + revise prompts are per-language — resolved at get() time via
+    # i18n.prompt_default (see _LANG_KEYS): gmail_triage_system/_user,
+    # gmail_revise_system/_user. The draft itself is written in the email's
+    # language; title/rationale follow the configured UI language.
 }
 
 
@@ -287,7 +268,10 @@ _LANG_KEYS = ("system_prompt_text", "system_prompt_image",
               # M14 assistant prompts (resolved per language at get() time)
               "assistant_propose_system", "assistant_digest_user",
               "assistant_resume_system", "assistant_resume_user",
-              "assistant_answer_system")
+              "assistant_answer_system",
+              # M17 Gmail prompts (per-language)
+              "gmail_triage_system", "gmail_triage_user",
+              "gmail_revise_system", "gmail_revise_user")
 
 
 def _migrate_providers(on_disk):

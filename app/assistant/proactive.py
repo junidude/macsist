@@ -256,7 +256,8 @@ class ProactiveEngine:
             tid = prop.get("thread_id")
             if tid:
                 self.threads.touch(tid)  # un-stale; resume gesture
-                self.threads.add_activity(tid, "resume", "사용자가 재개")
+                self.threads.add_activity(tid, "resume",
+                                          t("assistant.activity_resumed"))
                 self._open_links(self.threads.get(tid))
             return tid
         if kind == "remote_dispatch" and self.on_remote_dispatch is not None:
@@ -347,8 +348,9 @@ class ProactiveEngine:
         if summary:  # refresh the carried summary (internal, doesn't un-stale)
             self.threads.touch(thread["id"], bump=False,
                                where_was_i=where, next_action=nxt)
-        title = f"이어서: {thread.get('title', '')}".strip()
-        rationale = nxt or where or "오래 멈춰 있는 작업이에요."
+        title = t("assistant.resume_title").format(
+            title=thread.get("title", "")).strip()
+        rationale = nxt or where or t("assistant.resume_fallback")
         return self._emit(
             kind="thread_resume_nudge", title=title, rationale=rationale,
             source="stale_thread", source_ref=thread["id"],

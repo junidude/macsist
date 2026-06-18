@@ -118,7 +118,7 @@ class AssistantController:
         except Exception as exc:  # surfacing must never crash the loop
             print(f"assistant: panel present error {exc!r}", flush=True)
         if self.deliverer.should_telegram():
-            text = f"🤖 [비서 제안] {prop.get('title') or ''}"
+            text = f"{t('assistant.tg_proposal_prefix')} {prop.get('title') or ''}"
             if prop.get("rationale"):
                 text += f"\n{prop['rationale']}"
             self.deliverer.send_telegram(text)
@@ -187,8 +187,9 @@ class AssistantController:
         host = self.remote.host() or {}
         self.engine.propose(
             kind="remote_dispatch",
-            title=f"원격 위임: {text[:60]}",
-            rationale=f"{host.get('alias', '?')} · {host.get('agent', 'codex')} 에서 실행",
+            title=t("assistant.remote_delegate_title").format(text=text[:60]),
+            rationale=t("assistant.remote_run_on").format(
+                alias=host.get("alias", "?"), agent=host.get("agent", "codex")),
             payload={"action": "run_remote",
                      "args": {"prompt": text, "alias": host.get("alias"),
                               "agent": host.get("agent", "codex")}},
@@ -222,18 +223,20 @@ class AssistantController:
         """Main thread: a remote job finished — file the result as a thread and
         notify (Telegram when away)."""
         status = job.get("status")
-        mark = "완료" if status == "done" else "실패"
+        mark = t("assistant.done") if status == "done" else t("assistant.failed")
         self.threads.create(
-            title=f"원격 {mark}: {job.get('prompt', '')[:50]}",
+            title=t("assistant.remote_result_title").format(
+                mark=mark, prompt=job.get("prompt", "")[:50]),
             source="remote",
             where_was_i=(result or "")[:800],
-            next_action="결과 확인 후 반영",
+            next_action=t("assistant.remote_next"),
         )
         self._refresh()
         if self.deliverer.should_telegram():
             self.deliverer.send_telegram(
-                f"🤖 [원격 {mark}] {job.get('prompt', '')[:60]}\n"
-                f"{(result or '')[:500]}")
+                t("assistant.tg_remote").format(
+                    mark=mark, prompt=job.get("prompt", "")[:60],
+                    result=(result or "")[:500]))
 
     # == Gmail (M17) =========================================================
 
@@ -277,7 +280,7 @@ class AssistantController:
     def _draftDone(self, prop, draft_id, err):
         if err or not draft_id:
             self.proposals.mark_decided(prop["id"], "failed",
-                                        error=err or "draft 생성 실패")
+                                        error=err or t("assistant.err_draft_create"))
         else:
             # carry the real draft id + surface the 2nd-gesture send card
             self.proposals.update(prop["id"], result_ref=draft_id)
@@ -303,7 +306,7 @@ class AssistantController:
     def _sendDone(self, prop, sent_id, err):
         if err or not sent_id:
             self.proposals.mark_decided(prop["id"], "failed",
-                                        error=err or "전송 실패")
+                                        error=err or t("assistant.err_send"))
         else:
             self.proposals.update(prop["id"], result_ref=sent_id)
             print(f"gmail: sent {sent_id}", flush=True)
@@ -320,7 +323,8 @@ class AssistantController:
             )
             if self.deliverer.should_telegram():
                 self.deliverer.send_telegram(
-                    f"📧 [메일 전송] {subject}\n받는사람: {args.get('to', '')}")
+                    f"📧 [{t('assistant.mail_sent_title')}] {subject}\n"
+                    f"{t('assistant.mail_to')} {args.get('to', '')}")
         self._refresh()
 
     def reviseDraft(self, pid, instruction):

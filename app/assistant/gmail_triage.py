@@ -16,6 +16,7 @@ to pin it to the local MLX server (the digest then never leaves the machine).
 
 import json
 
+from i18n import t
 from llm_client import LLMClient, LLMError, StreamHandle
 
 from assistant.gmail_client import GmailClient, _addr
@@ -165,16 +166,16 @@ class GmailExecutor:
             body=args.get("draft", ""), thread_id=args.get("thread_id"),
             in_reply_to=args.get("in_reply_to"))
         if res.get("error"):
-            raise RuntimeError(f"draft 생성 실패: {res['error']}")
+            raise RuntimeError(f"{t('assistant.err_draft_create')}: {res['error']}")
         return res["draft_id"]
 
     def send_draft(self, args):
         draft_id = args.get("draft_id")
         if not draft_id:
-            raise RuntimeError("draft_id 없음")
+            raise RuntimeError(t("assistant.err_no_draft_id"))
         res = self.client.send_draft(draft_id)
         if res.get("error"):
-            raise RuntimeError(f"전송 실패: {res['error']}")
+            raise RuntimeError(f"{t('assistant.err_send')}: {res['error']}")
         return res.get("sent_id") or draft_id
 
 
