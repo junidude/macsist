@@ -193,7 +193,18 @@ class ProactiveEngine:
         if prop is None:
             return None
         self.audit.record(pid, prop.get("status"), "skipped", by, "skip")
-        return self.proposals.mark_decided(pid, "skipped")
+        res = self.proposals.mark_decided(pid, "skipped")
+        # skipping an ESCALATED stuck-thread nudge means "stop asking" → archive
+        # the thread so it's no longer a nudge target (the 비서 tidies it away).
+        args = (prop.get("payload") or {}).get("args") or {}
+        if prop.get("kind") == "thread_resume_nudge" and args.get("escalated"):
+            tid = prop.get("thread_id")
+            if tid:
+                from assistant.thread_store import ARCHIVED
+                self.threads.touch(tid, status=ARCHIVED)
+                print(f"proactive: archived stuck thread {tid} "
+                      f"(escalation skipped)", flush=True)
+        return res
 
     def snooze(self, pid, hours=None):
         prop = self.proposals.get(pid)
@@ -359,6 +370,12 @@ class ProactiveEngine:
         cap = int(self.config.get("assistant_nudge_max_per_cycle"))
         return [t for _o, t in candidates[:max(cap, 0)]]
 
+    def _nudge_count(self, tid):
+        """How many resume nudges this thread has already had (any status)."""
+        return sum(1 for p in self.proposals.all()
+                   if p.get("thread_id") == tid
+                   and p.get("kind") == "thread_resume_nudge")
+
     def _emit_resume_nudge(self, thread):
         summary = self._llm_resume(thread)
         where = summary.get("where_was_i") or thread.get("where_was_i") or ""
@@ -366,15 +383,26 @@ class ProactiveEngine:
         if summary:  # refresh the carried summary (internal, doesn't un-stale)
             self.threads.touch(thread["id"], bump=False,
                                where_was_i=where, next_action=nxt)
-        title = t("assistant.resume_title").format(
-            title=thread.get("title", "")).strip()
-        rationale = nxt or where or t("assistant.resume_fallback")
+        # ESCALATE after N nudges: stop repeating the same nudge — ask why it's
+        # stuck and let 건너뛰기 archive it (otherwise it's just a to-do list).
+        escalate_after = int(self.config.get("assistant_nudge_escalate_after"))
+        n = self._nudge_count(thread["id"])
+        escalated = escalate_after > 0 and n >= escalate_after
+        if escalated:
+            title = t("assistant.stuck_title").format(
+                title=thread.get("title", ""), n=n + 1).strip()
+            rationale = t("assistant.stuck_rationale")
+        else:
+            title = t("assistant.resume_title").format(
+                title=thread.get("title", "")).strip()
+            rationale = nxt or where or t("assistant.resume_fallback")
         return self._emit(
             kind="thread_resume_nudge", title=title, rationale=rationale,
             source="stale_thread", source_ref=thread["id"],
             thread_id=thread["id"],
             payload={"action": "none",
-                     "args": {"where_was_i": where, "next_action": nxt}},
+                     "args": {"where_was_i": where, "next_action": nxt,
+                              "escalated": escalated}},
         )
 
     def _recently_nudged(self, tid):
@@ -434,6 +462,34 @@ class ProactiveEngine:
             "<<CONTEXT>>", ctx)
         data = self._llm_json(system, user)
         return data if isinstance(data, dict) else {}
+
+    def route_intent(self, text):
+        """Classify free text into one handler intent for the 비서 tab's single
+        input box. Runs on a WORKER thread (LLM I/O). Returns {"intent": ...,
+        "text": ...} with intent in `assistant_router_intents`. Fail-safe: any
+        LLM error / malformed output / unknown intent falls back to "thread"
+        (passive memory — visible, never executes, undoable), mirroring risk.py's
+        unknown→fail-safe rule. `remote` is downgraded to `todo` when remote
+        delegation is disabled so the dispatcher never has to special-case it."""
+        text = (text or "").strip()
+        allowed = self.config.get("assistant_router_intents") or \
+            ["answer", "todo", "thread", "remote", "scan"]
+        intent = "thread"
+        try:
+            system = str(self.config.get("assistant_router_system"))
+            user = str(self.config.get("assistant_router_user")).replace(
+                "<<TEXT>>", text)
+            data = self._llm_json(system, user)
+            if isinstance(data, dict):
+                cand = str(data.get("intent") or "").strip().lower()
+                if cand in allowed:
+                    intent = cand
+        except Exception as exc:  # routing must never raise into the controller
+            print(f"router: route_intent error {exc!r} -> thread", flush=True)
+        if intent == "remote" and not bool(self.config.get("remote_enabled")):
+            intent = "todo"
+        print(f"router: routed -> {intent}", flush=True)
+        return {"intent": intent, "text": text}
 
     def _llm_propose(self, text):
         system = str(self.config.get("assistant_propose_system"))

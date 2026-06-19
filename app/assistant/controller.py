@@ -25,6 +25,8 @@ from assistant.gmail_triage import GmailTriager
 from assistant.proactive import DEFERRED, ProactiveEngine
 from assistant.proposal_store import ProposalStore, payload_args
 from assistant.remote_exec import RemoteAgentExecutor, RemoteJobStore
+from assistant.thread_store import ACTIVE as THREAD_ACTIVE
+from assistant.thread_store import DONE as THREAD_DONE
 from assistant.thread_store import ThreadStore
 from i18n import t
 from text_capture import capture_selected_text
@@ -37,6 +39,16 @@ def _hm_iso(iso):
         return datetime.fromisoformat(iso).strftime("%H:%M")
     except (ValueError, TypeError):
         return ""
+
+
+def _excerpt(text, limit=100):
+    """A one-line gist of what the assistant produced — first non-empty line,
+    whitespace collapsed, truncated — to fold back into a thread's card."""
+    for line in str(text or "").splitlines():
+        line = " ".join(line.split()).strip()
+        if line:
+            return (line[:limit] + "…") if len(line) > limit else line
+    return ""
 
 
 class AssistantController:
@@ -87,6 +99,11 @@ class AssistantController:
         main_window.on_assistant_propose = self.handlePropose_
         main_window.on_assistant_new_thread = self.new_thread
         main_window.on_assistant_scan = self.handleScan
+        # single-input router (replaces the 5-button toolbar) + thread card actions
+        main_window.on_assistant_send = self.handleSend_
+        main_window.on_assistant_resume = self.resume_thread
+        main_window.on_assistant_complete = self.complete_thread
+        main_window.on_assistant_delete_thread = self.delete_thread
         self.proposals.on_changed = lambda: AppHelper.callAfter(self._refresh)
 
     def start(self):
@@ -124,13 +141,19 @@ class AssistantController:
         AppHelper.callAfter(self._refresh)
 
     def _surface(self, prop):
-        """Main thread: show the proposal in the floating panel + refresh, and
-        (M15) push to Telegram when the user is away / in quiet hours."""
-        self._refresh()
-        try:
-            self._panel_controller().presentProposal_(prop)
-        except Exception as exc:  # surfacing must never crash the loop
-            print(f"assistant: panel present error {exc!r}", flush=True)
+        """Main thread: show the proposal. The floating panel pops ONLY when the
+        user is at the desk (not idle-away, screen unlocked, not quiet hours) —
+        otherwise it lands silently in the inbox (badge) + Telegram, so waking
+        the screen never floods you with accumulated proposals. (M15/M19-C)"""
+        self._refresh()  # badge always reflects the new pending proposal
+        if self.deliverer.user_present() and not self.deliverer.in_quiet_hours():
+            try:
+                self._panel_controller().presentProposal_(prop)
+            except Exception as exc:  # surfacing must never crash the loop
+                print(f"assistant: panel present error {exc!r}", flush=True)
+        else:
+            print("assistant: away/locked/quiet — proposal to inbox+telegram only",
+                  flush=True)
         if self.deliverer.should_telegram():
             text = f"{t('assistant.tg_proposal_prefix')} {prop.get('title') or ''}"
             if prop.get("rationale"):
@@ -147,8 +170,15 @@ class AssistantController:
     # == confirm-then-execute entry points (main thread) =====================
 
     def approve(self, pid, edited_payload=None):
+        prop = self.proposals.get(pid)
         self.engine.approve(pid, by="user", gesture="panel_approve",
                             edited_payload=edited_payload)
+        # approving an ESCALATED stuck-thread nudge = "비서가 이어서 처리해줘" →
+        # actually resume the thread (assistant produces the next step), not a no-op.
+        args = (prop or {}).get("payload", {}).get("args") or {}
+        if (prop and prop.get("kind") == "thread_resume_nudge"
+                and args.get("escalated") and prop.get("thread_id")):
+            self.resume_thread(prop["thread_id"])
         self._refresh()
 
     def skip(self, pid):
@@ -185,6 +215,151 @@ class AssistantController:
             return
         title = text.splitlines()[0][:120]
         self.threads.create(title=title, source="manual", where_was_i=text[:500])
+        self._refresh()
+
+    # == single-input router (M19) ===========================================
+
+    _QUESTION_HEADS = (
+        "뭐", "무엇", "왜", "어떻게", "어디", "언제", "누가", "얼마", "몇",
+        "what", "why", "how", "who", "when", "where", "which", "can ", "could ",
+        "does ", "do ", "is ", "are ", "should ",
+    )
+
+    def handleSend_(self, text):
+        """The 비서 tab's single send action. Deterministic fast-path on the main
+        thread (slash overrides / question heuristic / explicit keywords), else
+        a single LLM routing call off the main thread. Dispatch always lands back
+        on the main thread via callAfter."""
+        text = (text or "").strip()
+        if not text:
+            return
+        # a new request supersedes any in-flight resume → drop a stale "작업 중"
+        self.main_window.assistantClearThreadBusy()
+        intent = self._fastpath(text)
+        if intent is not None:
+            self._dispatch(intent, text)
+            return
+        # ambiguous → LLM router (worker thread), with an immediate echo row
+        try:
+            self.main_window.assistantShowRouting_(text)
+        except Exception as exc:
+            print(f"assistant: routing echo error {exc!r}", flush=True)
+        threading.Thread(
+            target=self._routeWorker, args=(text,),
+            name="assistant-route", daemon=True,
+        ).start()
+
+    def _fastpath(self, text):
+        """Return an intent without any LLM call, or None to defer to the router.
+        Slash command → forced intent; '?'/interrogative lead → answer; bare
+        keyword → scan/remote."""
+        slash = self.config.get("assistant_slash_commands") or {}
+        head = text.split(None, 1)[0].lower()
+        if head in slash:
+            return slash[head]
+        low = text.lower()
+        if text.endswith("?") or low.startswith(self._QUESTION_HEADS):
+            return "answer"
+        if low in ("스캔", "scan"):
+            return "scan"
+        if low in ("원격", "remote"):
+            return "remote"
+        return None
+
+    def _routeWorker(self, text):
+        routed = self.engine.route_intent(text)
+        AppHelper.callAfter(self._dispatch, routed.get("intent", "thread"),
+                            routed.get("text", text))
+
+    def _dispatch(self, intent, text):
+        """Main thread: clear the echo row and hand `text` to the existing
+        handler for the routed intent. A slash override may carry its own token
+        already stripped by _strip_slash."""
+        try:
+            self.main_window.assistantClearRouting()
+        except Exception as exc:
+            print(f"assistant: routing clear error {exc!r}", flush=True)
+        text = self._strip_slash(text)
+        if intent == "answer":
+            answer = getattr(self.main_window, "on_assistant_answer", None)
+            if answer is not None:
+                answer(text)
+                # the answer streams into the floating panel, leaving no trace in
+                # the tab — a toast confirms the send didn't silently fail.
+                try:
+                    self.main_window.assistantToast_(t("assistant.toast_answered"))
+                except Exception:
+                    pass
+        elif intent == "remote":
+            self.delegate_remote(text)
+        elif intent == "scan":
+            self.handleScan()
+        elif intent == "thread":
+            self.new_thread(text)
+        else:  # "todo"/"propose" and any unmapped value
+            self.handlePropose_(text)
+
+    def _strip_slash(self, text):
+        """Drop a leading slash-command token so the handler sees clean text."""
+        slash = self.config.get("assistant_slash_commands") or {}
+        parts = text.split(None, 1)
+        if parts and parts[0].lower() in slash:
+            return parts[1].strip() if len(parts) > 1 else ""
+        return text
+
+    # == thread card actions (main thread, from the tab) =====================
+
+    def resume_thread(self, tid):
+        """이어서: re-activate the thread AND ask the assistant to help continue
+        it (streams into the answer panel) — otherwise re-stamping an already-
+        active thread is an invisible no-op."""
+        if not tid:
+            return
+        th = self.threads.get(tid) or {}
+        self.threads.touch(tid, status=THREAD_ACTIVE)
+        answer = getattr(self.main_window, "on_assistant_answer", None)
+        if answer is None:
+            self._refresh()
+            return
+        # live: flip the card to "작업 중" now; the completion hook flips it to
+        # done and folds the produced result back into the thread (M19-A).
+        self.main_window.assistantSetThreadBusy_(tid)
+        # "지금까지" carries BOTH the user's original captured context and the
+        # latest assistant result (↩), so re-resuming never drops the original
+        # source material from the prompt.
+        parts = [p for p in ((th.get("where_was_i") or "").strip(),
+                             (th.get("last_result") or "").strip()) if p]
+        prompt = t("assistant.resume_prompt").format(
+            title=(th.get("title") or "").strip() or "—",
+            where="  ↩  ".join(parts) or "—",
+            next=(th.get("next_action") or "").strip() or "—",
+        )
+
+        def _done(ok, text, _tid=tid):  # main thread (gen-gated by _onMain)
+            self.main_window.assistantClearThreadBusy()
+            if ok:
+                excerpt = _excerpt(text)
+                if excerpt:
+                    # store in last_result (NOT where_was_i) so the user's
+                    # original "어디까지 했더라" context is never destroyed.
+                    self.threads.add_activity(_tid, "assistant", excerpt)
+                    self.threads.touch(_tid, last_result=excerpt)
+            self._refresh()
+
+        answer(prompt, on_done=_done)
+        self._refresh()
+
+    def complete_thread(self, tid):
+        if not tid:
+            return
+        self.threads.add_activity(tid, "completed", t("assistant.act_completed"))
+        self.threads.touch(tid, status=THREAD_DONE)
+        self._refresh()
+
+    def delete_thread(self, tid):
+        if not tid:
+            return
+        self.threads.remove(tid)
         self._refresh()
 
     # == remote delegation (M16) =============================================
@@ -342,7 +517,6 @@ class AssistantController:
             self.deliverer.send_telegram(
                 f"📧 [{t('assistant.mail_sent_title')}] {subject}\n"
                 f"{t('assistant.mail_to')} {args.get('to', '')}")
-        self._refresh()
         self._refresh()
 
     def reviseDraft(self, pid, instruction):

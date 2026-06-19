@@ -265,10 +265,15 @@ class ExplainController:
             target=self._runRegion, args=(gen, handle), daemon=True
         ).start()
 
-    def answer_question(self, text):
+    def answer_question(self, text, on_done=None):
         """M14: the 비서 does/answers a free-form request — ROUTED between the
         local LLM (fast) and the Hermes agent (hard/agentic). Result streams
-        into the result panel. Called from the 비서 tab's 답변 button (main)."""
+        into the result panel. Called from the 비서 tab's 답변 button (main).
+
+        on_done(ok, text): optional completion callback (M19-A). Fires ONCE on
+        the main thread when the answer terminates, gen-gated by _onMain so a
+        preempted answer never reports back. Used by the 비서 to flip a work
+        thread's card from '작업 중' to '완료' and fold the result back in."""
         text = (text or "").strip()
         if not text:
             return
@@ -279,7 +284,8 @@ class ExplainController:
         print(f"assistant answer gen={gen} route={route}", flush=True)
         worker = self._runAnswerHermes if route == "hermes" else self._runAnswer
         threading.Thread(
-            target=worker, args=(gen, handle, cursor_tl, text), daemon=True,
+            target=worker, args=(gen, handle, cursor_tl, text, on_done),
+            daemon=True,
         ).start()
 
     def _routeFor(self, text):
@@ -307,7 +313,7 @@ class ExplainController:
             return "hermes"
         return "local"
 
-    def _runAnswerHermes(self, gen, handle, cursor_tl, text):
+    def _runAnswerHermes(self, gen, handle, cursor_tl, text, on_done=None):
         """Delegate to the Hermes agent (one-shot, ~10-60s) and show the result
         in the panel. Marked '⚕ Hermes' so who answered is always visible."""
         if handle.cancelled:
@@ -318,11 +324,15 @@ class ExplainController:
             return
         if not ok:
             self._onMain(gen, self.panel.showErrorText_, "⚕ Hermes: " + answer)
+            if on_done is not None:
+                self._onMain(gen, on_done, False, "")
             return
         self._onMain(gen, self.panel.appendChunk_, "⚕ Hermes\n\n" + answer)
         self._onMain(gen, self.panel.finishStream)
+        if on_done is not None:
+            self._onMain(gen, on_done, True, answer)
 
-    def _runAnswer(self, gen, handle, cursor_tl, text):
+    def _runAnswer(self, gen, handle, cursor_tl, text, on_done=None):
         if handle.cancelled:
             return
         # centered on screen (the request comes from the window, not the cursor)
@@ -332,7 +342,7 @@ class ExplainController:
              "content": self.config.get("assistant_answer_system")},
             {"role": "user", "content": text},
         ]
-        self._stream(gen, handle, messages, mode="text")
+        self._stream(gen, handle, messages, mode="text", on_done=on_done)
 
     # -- worker thread ---------------------------------------------------------
 
@@ -456,7 +466,7 @@ class ExplainController:
         return str(level.get("prompt_suffix", "")), level.get("max_tokens"), key
 
     def _stream(self, gen, handle, messages, model=None, max_tokens=None,
-                error_suffix="", mode="text", detail=None):
+                error_suffix="", mode="text", detail=None, on_done=None):
         reasoning_chars = [0]
         parts = []  # accumulated content → assistant message for follow-ups
 
@@ -486,6 +496,8 @@ class ExplainController:
             # str(err) is the whole user-facing story — no tracebacks in the UI
             self._onMain(gen, self.panel.showErrorText_, str(err) + error_suffix)
             commit()
+            if on_done is not None:
+                self._onMain(gen, on_done, False, "")
             if self.health_monitor is not None:
                 # update the menu bar now, not a poll interval later
                 self.health_monitor.poke()
@@ -505,6 +517,8 @@ class ExplainController:
                 t("errors.no_content") + detail + error_suffix,
             )
         commit()
+        if on_done is not None:
+            self._onMain(gen, on_done, bool(got_content), "".join(parts))
 
     # -- follow-up session (M6) ------------------------------------------------
 

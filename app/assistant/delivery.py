@@ -49,6 +49,20 @@ class Deliverer:
         return self.idle_seconds() >= float(
             self.config.get("assistant_away_seconds"))
 
+    def screen_locked(self):
+        """True when the login session's screen is locked (or asleep). Used to
+        suppress the floating panel — proposals wait in the inbox/Telegram."""
+        try:
+            from Quartz import CGSessionCopyCurrentDictionary
+            d = CGSessionCopyCurrentDictionary()
+            return bool(d and d.get("CGSSessionScreenIsLocked"))
+        except Exception:
+            return False
+
+    def user_present(self):
+        """At-the-desk: not idle-away and the screen isn't locked."""
+        return not self.is_away() and not self.screen_locked()
+
     def in_quiet_hours(self):
         window = self.config.get("assistant_quiet_hours") or []
         if len(window) != 2:

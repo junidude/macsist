@@ -11,6 +11,7 @@ still reads the board on demand — only the live polling/badge is skipped.
 """
 
 import threading
+import time
 
 from PyObjCTools import AppHelper
 
@@ -86,10 +87,17 @@ class ProactiveMonitor:
 
     def _loop(self):
         while True:
-            self._wake.wait(
-                timeout=float(self.config.get("assistant_proactive_interval"))
-            )
+            interval = float(self.config.get("assistant_proactive_interval"))
+            t0 = time.time()
+            signaled = self._wake.wait(timeout=interval)
             self._wake.clear()
+            # A bare timeout (not a poke) that overshot the interval by a lot
+            # means the Mac slept through the deadline — skip this catch-up scan
+            # so nudges don't flood the screen on wake. The NEXT interval scans
+            # normally, and a manual poke() (signaled) always scans immediately.
+            if not signaled and (time.time() - t0) > interval + 60:
+                print("proactive: skipped wake catch-up scan", flush=True)
+                continue
             try:
                 self.engine.scan()
             except Exception as exc:  # never let the daemon thread die

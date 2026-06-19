@@ -168,6 +168,17 @@ DEFAULTS = {
     # auto_safe = auto-run auto-class kinds in assistant_auto_safe_kinds
     "assistant_autonomy": "propose_only",
     "assistant_auto_safe_kinds": [],        # decision #8: everything via panel
+    # ── Single-input router: the 비서 tab's one box routes free text to a
+    #    handler via the local LLM (assistant_router_* prompts). The allowed
+    #    intent set and the deterministic slash overrides are tunables.
+    "assistant_router_intents": ["answer", "todo", "thread", "remote", "scan"],
+    "assistant_slash_commands": {
+        "/답변": "answer", "/answer": "answer",
+        "/기억": "thread", "/note": "thread",
+        "/할일": "todo", "/todo": "todo",
+        "/원격": "remote", "/remote": "remote",
+        "/스캔": "scan", "/scan": "scan",
+    },
     "assistant_quiet_hours": [22, 8],       # [start_h, end_h] — no nudges
     # M15 Telegram delivery (via `hermes send`, no gateway needed). Off by
     # default; used as the away / quiet-hours channel. Target "telegram" = the
@@ -181,6 +192,9 @@ DEFAULTS = {
     "assistant_thread_stale_hours": 6,
     "assistant_nudge_max_per_cycle": 1,     # at most N resume nudges per cycle
     "assistant_nudge_cooldown_hours": 12,
+    # after this many nudges for the same stuck thread, escalate: ask why it's
+    # stuck and let 건너뛰기 archive it (so the 비서 doesn't nag like a to-do list)
+    "assistant_nudge_escalate_after": 2,
     "assistant_thread_log_max": 5000,
     "assistant_proposal_max": 200,
     # assistant hotkeys (single HotkeyManager — rebind only, never new listener)
@@ -286,6 +300,7 @@ _LANG_KEYS = ("system_prompt_text", "system_prompt_image",
               "assistant_propose_system", "assistant_digest_user",
               "assistant_resume_system", "assistant_resume_user",
               "assistant_answer_system",
+              "assistant_router_system", "assistant_router_user",
               # M17 Gmail prompts (per-language)
               "gmail_triage_system", "gmail_triage_user",
               "gmail_revise_system", "gmail_revise_user")

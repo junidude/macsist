@@ -40,6 +40,8 @@ from AppKit import (
     NSFontAttributeName,
     NSFontWeightMedium,
     NSForegroundColorAttributeName,
+    NSMutableParagraphStyle,
+    NSParagraphStyleAttributeName,
     NSImage,
     NSImageView,
     NSMakeRect,
@@ -65,6 +67,9 @@ from AppKit import (
     NSToolbarFlexibleSpaceItemIdentifier,
     NSView,
     NSViewHeightSizable,
+    NSViewMaxXMargin,
+    NSViewMinXMargin,
+    NSViewMinYMargin,
     NSViewWidthSizable,
     NSVisualEffectBlendingModeBehindWindow,
     NSVisualEffectMaterialSidebar,
@@ -85,6 +90,7 @@ from Foundation import (
     NSMutableAttributedString,
 )
 
+from assistant import risk
 from config import asset_dir
 from i18n import current_language, t
 from settings_window import SettingsPaneController, pane_min_size
@@ -114,6 +120,8 @@ SIDEBAR_WIDTH = 210.0
 SIDEBAR_INSET = 10.0  # the sidebar floats — gap to the window edges
 SIDEBAR_RADIUS = 14.0
 SESSIONS_WIDTH = 364.0  # right-hand session list column
+ASSIST_COL_W = 860.0  # 비서 탭: readable, centered content column (chat-style)
+_GUTTER = 18.0  # 비서 탭 left content gutter — aligns headers/lines with card text
 BUBBLE_RADIUS = 14.0
 BUBBLE_PAD = 12.0
 BUBBLE_GAP = 14.0
@@ -123,24 +131,172 @@ FONT_SMALL = 12.0  # captions / session sublines
 FONT_UI = 14.0  # buttons, switch labels, session titles
 _SEARCH_ITEM_ID = "search"
 
-def _assistant_section(doc, y, width, title):
+def _assistant_section(doc, y, width, title, count=None):
     """Module-level (NOT a method): NSObject-subclass methods need selector
-    arity (project memory pyobjc-selector-arg-naming). Returns the next y."""
+    arity (project memory pyobjc-selector-arg-naming). Returns the next y.
+    `count` (when given and >0) is appended as a subtle tally, e.g. '비서 제안  3'."""
+    from AppKit import NSLineBreakByTruncatingTail
+    if count:
+        title = f"{title} ({count})"
     label = NSTextField.labelWithString_(title)
     label.setFont_(NSFont.boldSystemFontOfSize_(13.0))
     label.setTextColor_(NSColor.secondaryLabelColor())
-    label.setFrame_(NSMakeRect(8, y + 6, width - 16, 18))
+    label.setLineBreakMode_(NSLineBreakByTruncatingTail)
+    label.setFrame_(NSMakeRect(_GUTTER, y + 10, width - _GUTTER - 8, 18))
     doc.addSubview_(label)
-    return y + 30.0
+    return y + 36.0
 
 
 def _assistant_empty(doc, y, width, text):
+    from AppKit import NSLineBreakByTruncatingTail
     label = NSTextField.labelWithString_(text)
     label.setFont_(NSFont.systemFontOfSize_(12.0))
     label.setTextColor_(NSColor.tertiaryLabelColor())
-    label.setFrame_(NSMakeRect(12, y + 2, width - 24, 18))
+    label.setLineBreakMode_(NSLineBreakByTruncatingTail)
+    label.setFrame_(NSMakeRect(_GUTTER, y + 2, width - _GUTTER - 8, 18))
+    label.setToolTip_(text)
     doc.addSubview_(label)
     return y + 26.0
+
+
+def _assistant_status(doc, y, width, text, connected):
+    """Live connection-state line — primary metadata (secondaryLabel), with a
+    state-colored ⌁ dot so it reads as a live indicator, not tutorial copy."""
+    from AppKit import NSLineBreakByTruncatingTail
+    rgb = (0.16, 0.55, 0.27) if connected else (0.55, 0.58, 0.62)  # _C_GREEN/_C_GRAY
+    dot = NSBox.alloc().initWithFrame_(NSMakeRect(_GUTTER, y + 7, 8, 8))
+    dot.setBoxType_(NSBoxCustom)
+    dot.setTitlePosition_(0)
+    dot.setBorderWidth_(0.0)
+    dot.setCornerRadius_(4.0)
+    dot.setContentViewMargins_(NSMakeSize(0, 0))
+    dot.setFillColor_(NSColor.colorWithRed_green_blue_alpha_(*rgb, 1.0))
+    doc.addSubview_(dot)
+    label = NSTextField.labelWithString_(text)
+    label.setFont_(NSFont.systemFontOfSize_(12.0))
+    label.setTextColor_(NSColor.secondaryLabelColor())
+    label.setLineBreakMode_(NSLineBreakByTruncatingTail)
+    label.setFrame_(NSMakeRect(_GUTTER + 14, y + 2, width - _GUTTER - 22, 18))
+    label.setToolTip_(text)
+    doc.addSubview_(label)
+    return y + 26.0
+
+
+# Shared palette — single source of truth for chip/dot/accent fills. Darkened
+# from the first pass so white text clears AA-large contrast on the fills (the
+# old bright orange was unreadable at 2.17:1). One place to tweak the theme.
+_C_GREEN = (0.16, 0.55, 0.27)
+_C_AMBER = (0.80, 0.47, 0.04)
+_C_RED = (0.84, 0.23, 0.23)
+_C_BLUE = (0.0, 0.42, 0.86)
+_C_GRAY = (0.55, 0.58, 0.62)
+
+# Risk class -> (i18n label key, RGB chip color). Mirrors proposal_panel.py so a
+# proposal card reads its safety class the same way the floating panel does.
+_RISK_LABEL = {
+    risk.AUTO: "assistant.risk_auto",
+    risk.CONFIRM: "assistant.risk_confirm",
+    risk.NEVER_AUTO: "assistant.risk_never",
+}
+_RISK_RGB = {
+    risk.AUTO: _C_GREEN,
+    risk.CONFIRM: _C_AMBER,
+    risk.NEVER_AUTO: _C_RED,
+}
+# kinds that carry a deterministic "what happens if I approve" line (i18n
+# assistant.effect_<kind>); others render no effect line.
+_EFFECT_KINDS = frozenset((
+    "todo_add", "reply_draft", "send_reply", "remote_dispatch",
+    "calendar_write", "calendar_delete", "send_money",
+))
+_ACCENT_BLUE = _C_BLUE
+
+
+def _card_box(y, card_w, card_h):
+    """A near-opaque card with a hairline border — reads cleanly over the glass
+    window on any desktop (the half-transparent fill was the muddy look)."""
+    box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
+    box.setBoxType_(NSBoxCustom)
+    box.setTitlePosition_(0)
+    box.setBorderType_(1)  # NSLineBorder
+    box.setBorderWidth_(1.0)
+    box.setBorderColor_(NSColor.separatorColor())
+    box.setCornerRadius_(12.0)
+    box.setContentViewMargins_(NSMakeSize(0, 0))
+    box.setFillColor_(
+        NSColor.textBackgroundColor().colorWithAlphaComponent_(0.92))
+    return box, box.contentView()
+
+
+def _accent_button(title, target, action, tag, frame, rgb):
+    """A filled, white-label pill for the primary action on a card (승인/이어서).
+    Plain NSButton (not PillButton) so the fixed fill isn't reset on hover. The
+    NSBezelStyleRegularSquare + centered paragraph style is the same recipe the
+    floating proposal panel uses to center white pill titles reliably."""
+    from AppKit import NSBezelStyleRegularSquare, NSNoImage
+
+    b = NSButton.alloc().initWithFrame_(frame)
+    b.setBezelStyle_(NSBezelStyleRegularSquare)
+    b.setBordered_(False)
+    b.setImagePosition_(NSNoImage)  # no image slot to push the title sideways
+    b.setWantsLayer_(True)
+    b.layer().setCornerRadius_(frame.size.height / 2.0)
+    b.layer().setMasksToBounds_(True)
+    r, g, bl = rgb
+    b.layer().setBackgroundColor_(
+        NSColor.colorWithRed_green_blue_alpha_(r, g, bl, 1.0).CGColor())
+    para = NSMutableParagraphStyle.alloc().init()
+    para.setAlignment_(2)  # NSTextAlignmentCenter
+    b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
+        title, {
+            NSForegroundColorAttributeName: NSColor.whiteColor(),
+            NSFontAttributeName: NSFont.boldSystemFontOfSize_(13.0),
+            NSParagraphStyleAttributeName: para,
+        }))
+    b.setAlignment_(2)  # cell alignment, applied AFTER the attributed title
+    b.setTarget_(target)
+    b.setAction_(action)
+    b.setTag_(tag)
+    return b
+
+
+# Thread status -> (human i18n label key, dot RGB).
+# thread source -> a small provenance glyph on the card title (external sources
+# only; manual/capture get none so the title stays clean).
+_SOURCE_GLYPH = {
+    "remote": "🖥",
+    "gmail": "📧",
+    "calendar": "📅",
+}
+_STATUS_META = {
+    "active": ("assistant.status_active", _C_GREEN),
+    "done": ("assistant.status_done", _C_GRAY),
+    "paused": ("assistant.status_paused", _C_AMBER),
+    "blocked": ("assistant.status_paused", _C_RED),
+}
+
+
+def _rel_time(hrs):
+    """A float hour-count -> a short localized 'when' string (방금 / N시간 전 /
+    N일 전). hrs comes from ThreadStore.idle_hours."""
+    try:
+        hrs = float(hrs)
+    except (TypeError, ValueError):
+        return ""
+    if hrs < 1 / 60.0:
+        return t("assistant.just_now")
+    if hrs < 1:
+        return t("assistant.min_ago").format(m=max(1, round(hrs * 60)))
+    if hrs < 24:
+        return t("assistant.idle_ago").format(h=round(hrs))
+    return t("assistant.days_ago").format(d=round(hrs / 24))
+
+
+def _subtle_button(title, target, action, tag, frame):
+    """A secondary card action — the app's gray hover pill (PillButton)."""
+    b = _make_pill(title, target, action, frame)
+    b.setTag_(tag)
+    return b
 
 
 def _mode_label(mode):
@@ -306,10 +462,21 @@ class MainWindowController(NSObject):
         self.on_assistant_propose = None     # text -> controller.handlePropose_
         self.on_assistant_new_thread = None  # text -> controller.new_thread
         self.on_assistant_scan = None        # -> controller.handleScan
+        self.on_assistant_send = None        # text -> controller.handleSend_ (router)
+        self.on_assistant_resume = None      # tid -> controller.resume_thread
+        self.on_assistant_complete = None    # tid -> controller.complete_thread
+        self.on_assistant_delete_thread = None  # tid -> controller.delete_thread
         self.assistant_scroll = None
         self.assistant_doc = None
         self.assistant_input = None
+        self.assistant_wrap = None
+        self._routing_box = None  # transient echo row while the router runs
+        self._toast_box = None    # transient action-confirmation row
+        self._pending_toast = None  # text queued to draw after the next refresh
+        self._busy_thread = None  # tid of the thread whose 이어서 is streaming
+        self._busy_ts = None      # monotonic stamp → watchdog clears a stuck busy
         self._inbox = []  # pending proposals (index == button tag)
+        self._threads = []  # in-progress threads (index == button tag)
         self.table = None  # session list (right column)
         self.chat_scroll = None
         self.chat_doc = None
@@ -398,6 +565,32 @@ class MainWindowController(NSObject):
             flush=True,
         )
 
+    def windowDidResize_(self, notification):
+        # keep the 비서 column centered and re-lay its cards at the new width on
+        # live resize (debounced — the card rebuild shouldn't run every drag tick).
+        from AppKit import NSObject as _NSObject
+        if self.assistant_wrap is None:
+            return
+        _NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(
+            self, "relayoutAssistant", None)
+        self.performSelector_withObject_afterDelay_(
+            "relayoutAssistant", None, 0.06)
+
+    def relayoutAssistant(self):
+        wrap = self.assistant_wrap
+        if wrap is None or wrap.superview() is None:
+            return
+        cw = wrap.superview().frame().size.width
+        col_w = min(cw - 2 * PADDING, ASSIST_COL_W)
+        x0 = round((cw - col_w) / 2.0)
+        wrap.setFrame_(NSMakeRect(x0, 0, col_w, wrap.superview().frame().size.height))
+        # children reflow via their autoresizing masks; re-lay the cards to the
+        # new column width (scroll content width tracks the wrap via WidthSizable).
+        if (self.tab_view is not None
+                and str(self.tab_view.selectedTabViewItem().identifier())
+                == "assistant"):
+            self.refreshAssistant()
+
     def windowWillClose_(self, notification):
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
         # Drop the window so the next open rebuilds fresh — this is how 창 모양
@@ -479,6 +672,10 @@ class MainWindowController(NSObject):
         )
         self.window.setTitle_("Macsist")
         self.window.setTitlebarAppearsTransparent_(True)
+        # floor the window so the 비서 column never narrows enough to clip the
+        # card button rows (sidebar island + a comfortable content column).
+        self.window.setContentMinSize_(
+            NSMakeSize(content_x + 540.0, 520.0))
         self.window.setReleasedWhenClosed_(False)
         self.window.setDelegate_(self)  # windowWillClose_ → Accessory policy
         self._applyFloating()
@@ -762,81 +959,195 @@ class MainWindowController(NSObject):
         size = container.frame().size
         cw, ch = size.width, size.height
         bar_h = 44.0
-        inner_w = cw - 2 * PADDING
-        # top toolbar: input + 제안 / 스레드 추가 / 스캔
+        # Readable, centered column (chat-style) — full-width cards on a wide
+        # window look stretched and empty. The column re-centers on resize via
+        # flexible left/right autoresizing margins on the wrapper.
+        col_w = min(cw - 2 * PADDING, ASSIST_COL_W)
+        x0 = round((cw - col_w) / 2.0)
+        wrap = NSView.alloc().initWithFrame_(NSMakeRect(x0, 0, col_w, ch))
+        wrap.setAutoresizingMask_(
+            NSViewMinXMargin | NSViewMaxXMargin | NSViewHeightSizable)
+        container.addSubview_(wrap)
+        self.assistant_wrap = wrap  # re-framed on window resize (keeps centered)
+
         bar_y = ch - PADDING - bar_h
-        btn_w, btn_gap = 92.0, 8.0
-        buttons = (
-            (t("assistant.answer_btn"), "answerClicked:"),
-            (t("assistant.remote_btn"), "remoteClicked:"),
-            (t("assistant.propose"), "proposeClicked:"),
-            (t("assistant.new_thread"), "newThreadClicked:"),
-            (t("assistant.scan"), "scanClicked:"),
-        )
-        field_w = inner_w - len(buttons) * (btn_w + btn_gap)
+        send_w, refresh_w, gap = 84.0, 34.0, 8.0
+        field_w = col_w - (send_w + refresh_w + 2 * gap)
+        # single input box — the local LLM routes the text to the right action
+        # (answer / todo / thread / remote / scan). One 전송 pill; Return sends.
         box, field = _make_round_field(
-            NSMakeRect(PADDING, bar_y + 6, field_w, 32), 14.0)
+            NSMakeRect(0, bar_y + 6, field_w, 32), 14.0)
+        box.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         field.setPlaceholderString_(t("assistant.input_placeholder"))
         field.setTarget_(self)
-        field.setAction_("answerClicked:")  # Return = 답변(즉시 수행)
+        field.setAction_("sendClicked:")  # Return = 전송 (router decides)
         self.assistant_input = field
-        container.addSubview_(box)
-        bx = PADDING + field_w + btn_gap
-        for i, (label, action) in enumerate(buttons):
-            container.addSubview_(_make_pill(
-                label, self, action,
-                NSMakeRect(bx + i * (btn_w + btn_gap), bar_y + 7, btn_w, 30)))
+        wrap.addSubview_(box)
+        # manual refresh — "check now" (pokes the proactive scan + re-reads)
+        refresh = _make_pill(
+            "↻", self, "refreshClicked:",
+            NSMakeRect(field_w + gap, bar_y + 7, refresh_w, 30))
+        refresh.setToolTip_(t("assistant.refresh_tip"))
+        refresh.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        wrap.addSubview_(refresh)
+        send = _make_pill(
+            t("assistant.send"), self, "sendClicked:",
+            NSMakeRect(col_w - send_w, bar_y + 7, send_w, 30))
+        send.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        wrap.addSubview_(send)
         # scroll area below the toolbar
         self.assistant_scroll = NSScrollView.alloc().initWithFrame_(
-            NSMakeRect(PADDING, PADDING, inner_w, bar_y - PADDING)
+            NSMakeRect(0, PADDING, col_w, bar_y - PADDING)
         )
+        self.assistant_scroll.setAutoresizingMask_(
+            NSViewWidthSizable | NSViewHeightSizable)
         self.assistant_scroll.setHasVerticalScroller_(True)
         self.assistant_scroll.setDrawsBackground_(False)
         self.assistant_doc = _FlippedView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, inner_w, 10)
+            NSMakeRect(0, 0, col_w, 10)
         )
         self.assistant_scroll.setDocumentView_(self.assistant_doc)
-        container.addSubview_(self.assistant_scroll)
+        wrap.addSubview_(self.assistant_scroll)
 
     # -- assistant tab actions --
 
-    def answerClicked_(self, sender):
+    def sendClicked_(self, sender):
         text = str(self.assistant_input.stringValue()).strip()
-        if text and self.on_assistant_answer is not None:
-            self.on_assistant_answer(text)
+        if text and self.on_assistant_send is not None:
             self.assistant_input.setStringValue_("")
+            self.on_assistant_send(text)
 
-    def remoteClicked_(self, sender):
-        text = str(self.assistant_input.stringValue()).strip()
-        if text and self.on_assistant_remote is not None:
-            self.on_assistant_remote(text)
-            self.assistant_input.setStringValue_("")
-
-    def proposeClicked_(self, sender):
-        text = str(self.assistant_input.stringValue()).strip()
-        if text and self.on_assistant_propose is not None:
-            self.on_assistant_propose(text)
-            self.assistant_input.setStringValue_("")
-
-    def newThreadClicked_(self, sender):
-        text = str(self.assistant_input.stringValue()).strip()
-        if text and self.on_assistant_new_thread is not None:
-            self.on_assistant_new_thread(text)
-            self.assistant_input.setStringValue_("")
-
-    def scanClicked_(self, sender):
+    def refreshClicked_(self, sender):
         if self.on_assistant_scan is not None:
-            self.on_assistant_scan()
+            self.on_assistant_scan()  # poke the proactive scan ("check now")
+        self.refreshAssistant()
+        self.assistantToast_(t("assistant.toast_refreshed"))
+
+    def assistantShowRouting_(self, text):
+        """Transient echo row pinned above the list while the LLM router runs;
+        cleared by the controller's _dispatch before it refreshes the tab."""
+        doc = self.assistant_doc
+        if doc is None:
+            return
+        self.assistantClearRouting()
+        width = self.assistant_scroll.contentSize().width
+        # opaque card (not a translucent overlay) so the status line never bleeds
+        # through behind it; sits pinned at the very top while the router runs.
+        box, inner = _card_box(4, width - 8, 38)
+        from AppKit import NSLineBreakByTruncatingTail
+        lbl = NSTextField.labelWithString_(
+            f"⏳ {t('assistant.routing')}  {str(text)[:60]}")
+        lbl.setFont_(NSFont.systemFontOfSize_(12.0))
+        lbl.setTextColor_(NSColor.secondaryLabelColor())
+        lbl.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        lbl.setFrame_(NSMakeRect(12, 11, width - 8 - 24, 18))
+        inner.addSubview_(lbl)
+        doc.addSubview_(box)
+        self._routing_box = box
+
+    def assistantClearRouting(self):
+        if self._routing_box is not None:
+            self._routing_box.removeFromSuperview()
+            self._routing_box = None
+
+    def assistantToast_(self, text):
+        """Brief confirmation row after a card action (승인/완료/삭제 …) so the
+        acted-on card doesn't silently vanish. The actual draw is deferred one
+        runloop tick so it lands AFTER the action's queued refresh (which would
+        otherwise wipe it immediately)."""
+        from AppKit import NSObject as _NSObject
+        self._pending_toast = str(text)
+        _NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(
+            self, "assistantDrawToast", None)
+        self.performSelector_withObject_afterDelay_(
+            "assistantDrawToast", None, 0.05)
+
+    def assistantDrawToast(self):
+        doc = self.assistant_doc
+        if doc is None or self._pending_toast is None:
+            return
+        from AppKit import NSLineBreakByTruncatingTail, NSObject as _NSObject
+        if self._toast_box is not None:
+            self._toast_box.removeFromSuperview()
+        width = self.assistant_scroll.contentSize().width
+        box, inner = _card_box(4, width - 8, 34)
+        lbl = NSTextField.labelWithString_("✓ " + self._pending_toast)
+        lbl.setFont_(NSFont.systemFontOfSize_(12.0))
+        lbl.setTextColor_(NSColor.secondaryLabelColor())
+        lbl.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        lbl.setFrame_(NSMakeRect(12, 9, width - 8 - 24, 18))
+        inner.addSubview_(lbl)
+        doc.addSubview_(box)
+        self._toast_box = box
+        self._pending_toast = None
+        _NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(
+            self, "assistantClearToast", None)
+        self.performSelector_withObject_afterDelay_(
+            "assistantClearToast", None, 2.0)
+
+    def assistantClearToast(self):
+        if self._toast_box is not None:
+            self._toast_box.removeFromSuperview()
+            self._toast_box = None
+
+    def assistantSetThreadBusy_(self, tid):
+        """Mark a thread as actively being worked on (이어서 streaming) so its
+        card shows '작업 중'; only one at a time (a new answer preempts)."""
+        import time
+        self._busy_thread = str(tid) if tid else None
+        self._busy_ts = time.monotonic()
+        self.refreshAssistantIfVisible()
+
+    def assistantClearThreadBusy(self):
+        if self._busy_thread is not None:
+            self._busy_thread = None
+            self._busy_ts = None
+            self.refreshAssistantIfVisible()
 
     def approveProposal_(self, sender):
         idx = int(sender.tag())
         if 0 <= idx < len(self._inbox) and self.on_assistant_approve is not None:
             self.on_assistant_approve(self._inbox[idx].get("id"))
+            self.assistantToast_(t("assistant.toast_approved"))
 
     def skipProposal_(self, sender):
         idx = int(sender.tag())
         if 0 <= idx < len(self._inbox) and self.on_assistant_skip is not None:
             self.on_assistant_skip(self._inbox[idx].get("id"))
+            self.assistantToast_(t("assistant.toast_skipped"))
+
+    def snoozeProposal_(self, sender):
+        idx = int(sender.tag())
+        if 0 <= idx < len(self._inbox) and self.on_assistant_snooze is not None:
+            self.on_assistant_snooze(self._inbox[idx].get("id"))
+            self.assistantToast_(t("assistant.toast_snoozed"))
+
+    def resumeThread_(self, sender):
+        idx = int(sender.tag())
+        if 0 <= idx < len(self._threads) and self.on_assistant_resume is not None:
+            self.on_assistant_resume(self._threads[idx].get("id"))
+
+    def completeThread_(self, sender):
+        idx = int(sender.tag())
+        if 0 <= idx < len(self._threads) and self.on_assistant_complete is not None:
+            self.on_assistant_complete(self._threads[idx].get("id"))
+            self.assistantToast_(t("assistant.toast_completed"))
+
+    def deleteThread_(self, sender):
+        idx = int(sender.tag())
+        if not (0 <= idx < len(self._threads)
+                and self.on_assistant_delete_thread is not None):
+            return
+        tid = self._threads[idx].get("id")
+        # destructive + no undo → confirm first
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(t("assistant.delete_confirm_title"))
+        alert.setInformativeText_(t("assistant.delete_confirm_msg"))
+        alert.addButtonWithTitle_(t("assistant.delete"))  # first = default
+        alert.addButtonWithTitle_(t("assistant.cancel"))
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            self.on_assistant_delete_thread(tid)
+            self.assistantToast_(t("assistant.toast_deleted"))
 
     def refreshAssistant(self):
         """Re-render the 비서 tab: work threads (M14, "어디까지 했더라") + the
@@ -860,6 +1171,7 @@ class MainWindowController(NSObject):
             except Exception as exc:
                 print(f"assistant tab: inbox read error {exc!r}", flush=True)
         self._inbox = inbox
+        self._threads = threads  # index == button tag for the card actions
         status = {}
         if self.assistant_bridge is not None:
             try:
@@ -869,49 +1181,65 @@ class MainWindowController(NSObject):
         doc = self.assistant_doc
         if doc is None:
             return
+        self._routing_box = None  # was removed by the rebuild below
+        self._toast_box = None
+        # watchdog: a gen-gated completion callback can be dropped if the answer
+        # is preempted / the panel is dismissed; never let "작업 중" stick forever.
+        if self._busy_thread is not None and self._busy_ts is not None:
+            import time
+            # > a long Hermes agent run (its docstring says ~10–60s; allow slack)
+            if time.monotonic() - self._busy_ts > 300:
+                self._busy_thread = None
+                self._busy_ts = None
         for sub in list(doc.subviews()):
             sub.removeFromSuperview()
         width = self.assistant_scroll.contentSize().width
         connected = bool(status.get("connected"))  # external agent (Hermes)
-        inbox_h, th_h, task_h, gap = 100.0, 88.0, 76.0, 8.0
-        total = 56.0  # status line + help line
-        total += 30 + (len(inbox) * (inbox_h + gap) if inbox else 26)
-        total += 30 + (len(threads) * (th_h + gap) if threads else 26)
-        if connected:
-            total += 30 + (len(tasks) * (task_h + gap) if tasks else 26)
-        doc.setFrameSize_(NSMakeSize(width, total))
-        y = 4.0
+        gap = 10.0
+        # cards are drawn with content-derived heights and we accumulate y, so
+        # the doc height is exact (no hardcoded per-card constants to desync).
+        y = 6.0
         if connected:
             gw = t("assistant.gw_on") if status.get("gateway") == "running" \
                 else t("assistant.gw_off")
-            line = (f"⌁ {t('assistant.hermes_on')} · {gw} · "
+            line = (f"{t('assistant.hermes_on')} · {gw} · "
                     f"{t('assistant.tasks_title')} {status.get('board_count', 0)}")
         else:
             line = t("assistant.local_only")
-        y = _assistant_empty(doc, y, width, line)
-        y = _assistant_empty(doc, y, width, t("assistant.help_line"))
-        y = _assistant_section(doc, y, width, t("menubar.assistant_inbox"))
+        y = _assistant_status(doc, y, width, line, connected)
+        # help line is onboarding copy — only when the whole tab is empty
+        if not inbox and not threads:
+            y = _assistant_empty(doc, y, width, t("assistant.help_line"))
+        y += 6
+        y = _assistant_section(doc, y, width, t("assistant.section_proposals"),
+                               len(inbox))
         if inbox:
             for i in range(len(inbox)):
-                self._addProposalCardTo_y_width_index_(doc, y, width, i)
-                y += inbox_h + gap
+                y += self._addProposalCardTo_y_width_index_(doc, y, width, i) + gap
         else:
             y = _assistant_empty(doc, y, width, t("assistant.inbox_empty"))
-        y = _assistant_section(doc, y, width, t("assistant.threads_title"))
+        y += 8
+        y = _assistant_section(doc, y, width, t("assistant.threads_title"),
+                               len(threads))
+        # the passive-memory promise is always shown here (it's the trust line a
+        # new user most needs precisely when they have no threads yet)
+        y = _assistant_empty(doc, y, width, t("assistant.passive_hint"))
         if threads:
-            for th in threads:
-                self._addThreadCardTo_y_width_thread_(doc, y, width, th)
-                y += th_h + gap
+            for i in range(len(threads)):
+                y += self._addThreadCardTo_y_width_index_(doc, y, width, i) + gap
         else:
             y = _assistant_empty(doc, y, width, t("assistant.no_threads"))
         if connected:  # external board section only when an agent is connected
-            y = _assistant_section(doc, y, width, t("assistant.tasks_title"))
+            y += 8
+            y = _assistant_section(doc, y, width, t("assistant.section_kanban"),
+                                   len(tasks))
             if tasks:
                 for task in tasks:
-                    self._addKanbanCardTo_y_width_task_(doc, y, width, task)
-                    y += task_h + gap
+                    y += self._addKanbanCardTo_y_width_task_(doc, y, width, task) \
+                        + gap
             else:
                 y = _assistant_empty(doc, y, width, t("assistant.empty"))
+        doc.setFrameSize_(NSMakeSize(width, y + 16))
 
     def refreshAssistantIfVisible(self):
         """Called from AssistantController on a change — only redraw when the
@@ -923,26 +1251,23 @@ class MainWindowController(NSObject):
             self.refreshAssistant()
 
     def _addKanbanCardTo_y_width_task_(self, doc, y, width, task):
+        """Read-only Hermes board card (never writes the DB); returns height."""
         from datetime import datetime
 
         from AppKit import NSLineBreakByTruncatingTail, NSTextAlignmentRight
 
-        card_w, card_h, pad = width - 8, 76.0, 12.0
-        box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
-        box.setBoxType_(NSBoxCustom)
-        box.setTitlePosition_(0)
-        box.setBorderWidth_(0.0)
-        box.setCornerRadius_(10.0)
-        box.setContentViewMargins_(NSMakeSize(0, 0))
-        box.setFillColor_(
-            NSColor.textBackgroundColor().colorWithAlphaComponent_(0.5)
-        )
-        inner = box.contentView()
+        body = str(task.get("body") or "").replace("\n", " ").strip()
+        pad = 14.0
+        card_h = 80.0 if body else 60.0
+        card_w = width - 8
+        box, inner = _card_box(y, card_w, card_h)
 
-        title = NSTextField.labelWithString_(str(task.get("title") or "—"))
-        title.setFont_(NSFont.boldSystemFontOfSize_(14.0))
+        title_s = str(task.get("title") or "—")
+        title = NSTextField.labelWithString_(title_s)
+        title.setFont_(NSFont.boldSystemFontOfSize_(15.0))
         title.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        title.setFrame_(NSMakeRect(pad, card_h - 28, card_w - 2 * pad - 104, 19))
+        title.setToolTip_(title_s)
+        title.setFrame_(NSMakeRect(pad, card_h - 31, card_w - 2 * pad - 104, 20))
         inner.addSubview_(title)
 
         status = str(task.get("status") or "")
@@ -951,18 +1276,20 @@ class MainWindowController(NSObject):
             st.setFont_(NSFont.systemFontOfSize_(11.0))
             st.setAlignment_(NSTextAlignmentRight)
             st.setTextColor_(NSColor.secondaryLabelColor())
-            st.setFrame_(NSMakeRect(card_w - pad - 100, card_h - 27, 100, 16))
+            st.setFrame_(NSMakeRect(card_w - pad - 100, card_h - 29, 100, 16))
             inner.addSubview_(st)
 
-        body = str(task.get("body") or "").replace("\n", " ").strip()
         if body:
             sn = NSTextField.labelWithString_(body)
             sn.setFont_(NSFont.systemFontOfSize_(12.0))
             sn.setTextColor_(NSColor.secondaryLabelColor())
             sn.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            sn.setFrame_(NSMakeRect(pad, card_h - 50, card_w - 2 * pad, 17))
+            sn.setToolTip_(body)
+            sn.setFrame_(NSMakeRect(pad, card_h - 52, card_w - 2 * pad, 17))
             inner.addSubview_(sn)
 
+        # footer meta — the section header already says "(읽기 전용)", so no
+        # per-card read-only tag here (it was redundant).
         bits = []
         for field in ("assignee", "tenant"):
             if task.get(field):
@@ -981,121 +1308,207 @@ class MainWindowController(NSObject):
             ft.setFont_(NSFont.systemFontOfSize_(11.0))
             ft.setTextColor_(NSColor.tertiaryLabelColor())
             ft.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            ft.setFrame_(NSMakeRect(pad, 8, card_w - 2 * pad, 15))
+            ft.setFrame_(NSMakeRect(pad, 9, card_w - 2 * pad, 15))
             inner.addSubview_(ft)
 
         doc.addSubview_(box)
+        return card_h
 
-    def _addThreadCardTo_y_width_thread_(self, doc, y, width, thread):
+    def _addThreadCardTo_y_width_index_(self, doc, y, width, index):
+        """Render one work-thread card sized to its content; returns its height."""
         from AppKit import NSLineBreakByTruncatingTail, NSTextAlignmentRight
 
-        card_w, card_h, pad = width - 8, 88.0, 12.0
-        box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
-        box.setBoxType_(NSBoxCustom)
-        box.setTitlePosition_(0)
-        box.setBorderWidth_(0.0)
-        box.setCornerRadius_(10.0)
-        box.setContentViewMargins_(NSMakeSize(0, 0))
-        box.setFillColor_(
-            NSColor.textBackgroundColor().colorWithAlphaComponent_(0.5)
-        )
-        inner = box.contentView()
+        thread = self._threads[index]
+        pad, line_h, btn_h = 14.0, 22.0, 30.0
+        where = str(thread.get("where_was_i") or "").replace("\n", " ").strip()
+        nxt = str(thread.get("next_action") or "").replace("\n", " ").strip()
+        last = str(thread.get("last_result") or "").replace("\n", " ").strip()
+        n_lines = (1 if where else 0) + (1 if nxt else 0) + (1 if last else 0)
+        card_h = 14 + 22 + n_lines * line_h + 12 + btn_h + 12
+        card_w = width - 8
+        box, inner = _card_box(y, card_w, card_h)
 
-        title = NSTextField.labelWithString_(str(thread.get("title") or "—"))
-        title.setFont_(NSFont.boldSystemFontOfSize_(14.0))
+        # colored status dot + title
+        status = str(thread.get("status") or "active")
+        label_key, dot_rgb = _STATUS_META.get(
+            status, ("assistant.status_active", _C_GRAY))
+        dot = NSBox.alloc().initWithFrame_(NSMakeRect(pad, card_h - 25, 9, 9))
+        dot.setBoxType_(NSBoxCustom)
+        dot.setTitlePosition_(0)
+        dot.setBorderWidth_(0.0)
+        dot.setCornerRadius_(4.5)
+        dot.setContentViewMargins_(NSMakeSize(0, 0))
+        dr, dg, db = dot_rgb
+        dot.setFillColor_(NSColor.colorWithRed_green_blue_alpha_(dr, dg, db, 1.0))
+        inner.addSubview_(dot)
+
+        title_s = str(thread.get("title") or "—")
+        glyph = _SOURCE_GLYPH.get(str(thread.get("source") or ""), "")
+        title = NSTextField.labelWithString_(
+            (glyph + " " + title_s) if glyph else title_s)
+        title.setFont_(NSFont.boldSystemFontOfSize_(15.0))
         title.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        title.setFrame_(NSMakeRect(pad, card_h - 28, card_w - 2 * pad - 90, 19))
+        title.setToolTip_(title_s)
+        title.setFrame_(NSMakeRect(pad + 16, card_h - 31, card_w - 2 * pad - 150, 20))
         inner.addSubview_(title)
 
-        status = str(thread.get("status") or "")
-        if status:
-            st = NSTextField.labelWithString_(status)
-            st.setFont_(NSFont.systemFontOfSize_(11.0))
-            st.setAlignment_(NSTextAlignmentRight)
-            st.setTextColor_(NSColor.secondaryLabelColor())
-            st.setFrame_(NSMakeRect(card_w - pad - 86, card_h - 27, 86, 16))
-            inner.addSubview_(st)
+        # corner status stays SHORT (status/⏳ + relative time); the substance of
+        # what was done lives in the full-width 📍 line below (where_was_i, which
+        # the completion hook updates), so it never gets crammed/clipped here.
+        try:
+            hrs = self.assistant_threads.idle_hours(thread)
+        except Exception:
+            hrs = None
+        busy = (self._busy_thread is not None
+                and str(thread.get("id")) == self._busy_thread)
+        if busy:
+            prog = "⏳ " + t("assistant.working")
+        else:
+            prog = t(label_key)
+            when = _rel_time(hrs) if hrs is not None else ""
+            if when:
+                prog = f"{prog} · {when}"
+        pl = NSTextField.labelWithString_(prog)
+        pl.setFont_(NSFont.systemFontOfSize_(11.0))
+        pl.setAlignment_(NSTextAlignmentRight)
+        pl.setTextColor_(NSColor.tertiaryLabelColor())
+        pl.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        pl.setFrame_(NSMakeRect(card_w - pad - 150, card_h - 29, 150, 16))
+        inner.addSubview_(pl)
 
-        where = str(thread.get("where_was_i") or "").replace("\n", " ").strip()
+        ly = card_h - 31 - line_h
         if where:
             w = NSTextField.labelWithString_("📍 " + where)
             w.setFont_(NSFont.systemFontOfSize_(12.0))
             w.setTextColor_(NSColor.secondaryLabelColor())
             w.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            w.setFrame_(NSMakeRect(pad, card_h - 50, card_w - 2 * pad, 17))
+            w.setToolTip_(where)
+            w.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
             inner.addSubview_(w)
+            ly -= line_h
 
-        nxt = str(thread.get("next_action") or "").replace("\n", " ").strip()
         if nxt:
             n = NSTextField.labelWithString_("→ " + nxt)
             n.setFont_(NSFont.systemFontOfSize_(12.0))
+            n.setTextColor_(NSColor.labelColor())
             n.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            n.setFrame_(NSMakeRect(pad, 10, card_w - 2 * pad, 17))
+            n.setToolTip_(nxt)
+            n.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
             inner.addSubview_(n)
+            ly -= line_h
+
+        if last:  # what the assistant produced last time you hit 이어서
+            lr = NSTextField.labelWithString_("✅ " + last)
+            lr.setFont_(NSFont.systemFontOfSize_(12.0))
+            lr.setTextColor_(NSColor.secondaryLabelColor())
+            lr.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            lr.setToolTip_(last)
+            lr.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
+            inner.addSubview_(lr)
+
+        # 이어서 = filled accent · 완료 / 삭제 = subtle
+        inner.addSubview_(_accent_button(
+            t("assistant.resume"), self, "resumeThread:", index,
+            NSMakeRect(pad, 12, 84, btn_h), _ACCENT_BLUE))
+        inner.addSubview_(_subtle_button(
+            t("assistant.done"), self, "completeThread:", index,
+            NSMakeRect(pad + 92, 12, 76, btn_h)))
+        inner.addSubview_(_subtle_button(
+            t("assistant.delete"), self, "deleteThread:", index,
+            NSMakeRect(pad + 176, 12, 76, btn_h)))
 
         doc.addSubview_(box)
+        return card_h
 
     def _addProposalCardTo_y_width_index_(self, doc, y, width, index):
-        from AppKit import (
-            NSBezelStyleRounded,
-            NSLineBreakByTruncatingTail,
-            NSTextAlignmentRight,
-        )
+        """Render one proposal card sized to its content; returns its height."""
+        from AppKit import NSLineBreakByTruncatingTail
 
         prop = self._inbox[index]
-        card_w, card_h, pad = width - 8, 100.0, 12.0
-        box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
-        box.setBoxType_(NSBoxCustom)
-        box.setTitlePosition_(0)
-        box.setBorderWidth_(0.0)
-        box.setCornerRadius_(10.0)
-        box.setContentViewMargins_(NSMakeSize(0, 0))
-        box.setFillColor_(
-            NSColor.textBackgroundColor().colorWithAlphaComponent_(0.6)
-        )
-        inner = box.contentView()
+        pad, line_h, btn_h = 14.0, 22.0, 30.0
+        kind = str(prop.get("kind") or "")
+        rat = str(prop.get("rationale") or "").replace("\n", " ").strip()
+        # body lines: effect (always — generic fallback) + rationale (if any)
+        n_lines = 1 + (1 if rat else 0)
+        card_h = 14 + 22 + n_lines * line_h + 12 + btn_h + 12
+        card_w = width - 8
+        box, inner = _card_box(y, card_w, card_h)
 
-        title = NSTextField.labelWithString_(str(prop.get("title") or "—"))
-        title.setFont_(NSFont.boldSystemFontOfSize_(14.0))
+        # risk chip — colored, human-readable (mirrors the floating panel badge)
+        klass = str(prop.get("risk") or risk.NEVER_AUTO)
+        r, g, b = _RISK_RGB.get(klass, _RISK_RGB[risk.NEVER_AUTO])
+        chip_w = 104.0
+        chip = NSBox.alloc().initWithFrame_(
+            NSMakeRect(card_w - pad - chip_w, card_h - 32, chip_w, 20))
+        chip.setBoxType_(NSBoxCustom)
+        chip.setTitlePosition_(0)
+        chip.setBorderWidth_(0.0)
+        chip.setCornerRadius_(10.0)
+        chip.setContentViewMargins_(NSMakeSize(0, 0))
+        chip.setFillColor_(NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0))
+        cl = NSTextField.labelWithString_(t(_RISK_LABEL.get(klass,
+                                                            "assistant.risk_never")))
+        cl.setFont_(NSFont.boldSystemFontOfSize_(10.0))
+        cl.setTextColor_(NSColor.whiteColor())
+        cl.setAlignment_(2)  # NSTextAlignmentCenter
+        cl.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        cl.setFrame_(NSMakeRect(2, 3, chip_w - 4, 14))
+        chip.contentView().addSubview_(cl)
+        inner.addSubview_(chip)
+
+        title_s = str(prop.get("title") or "—")
+        title = NSTextField.labelWithString_(title_s)
+        title.setFont_(NSFont.boldSystemFontOfSize_(15.0))
         title.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        title.setFrame_(NSMakeRect(pad, card_h - 28, card_w - 2 * pad - 90, 19))
+        title.setToolTip_(title_s)
+        title.setFrame_(NSMakeRect(pad, card_h - 31, card_w - 2 * pad - chip_w - 8, 20))
         inner.addSubview_(title)
 
-        risk = str(prop.get("risk") or "")
-        if risk:
-            rb = NSTextField.labelWithString_(risk)
-            rb.setFont_(NSFont.systemFontOfSize_(10.0))
-            rb.setTextColor_(NSColor.tertiaryLabelColor())
-            rb.setAlignment_(NSTextAlignmentRight)
-            rb.setFrame_(NSMakeRect(card_w - pad - 90, card_h - 26, 90, 14))
-            inner.addSubview_(rb)
+        ly = card_h - 31 - line_h
+        # deterministic "what happens if I approve" line (kind-based, no LLM);
+        # generic fallback guarantees no approve button is ever unlabeled.
+        eff_key = ("assistant.effect_" + kind) if kind in _EFFECT_KINDS \
+            else "assistant.effect_generic"
+        eff_s = t(eff_key)
+        ef = NSTextField.labelWithString_(eff_s)
+        ef.setFont_(NSFont.systemFontOfSize_(12.0))
+        # semantic color (adapts to light/dark); the risk *color* lives on the
+        # chip, so the effect text stays readable on the near-white card.
+        ef.setTextColor_(NSColor.secondaryLabelColor())
+        ef.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        ef.setToolTip_(eff_s)
+        ef.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
+        inner.addSubview_(ef)
+        ly -= line_h
 
-        rat = str(prop.get("rationale") or "").replace("\n", " ").strip()
         if rat:
-            r = NSTextField.labelWithString_(rat)
-            r.setFont_(NSFont.systemFontOfSize_(12.0))
-            r.setTextColor_(NSColor.secondaryLabelColor())
-            r.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            r.setFrame_(NSMakeRect(pad, card_h - 50, card_w - 2 * pad, 17))
-            inner.addSubview_(r)
+            rr = NSTextField.labelWithString_(rat)
+            rr.setFont_(NSFont.systemFontOfSize_(12.0))
+            rr.setTextColor_(NSColor.secondaryLabelColor())
+            rr.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            rr.setToolTip_(rat)
+            rr.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
+            inner.addSubview_(rr)
 
-        approve = NSButton.alloc().initWithFrame_(NSMakeRect(pad, 12, 96, 28))
-        approve.setTitle_(t("assistant.approve"))
-        approve.setBezelStyle_(NSBezelStyleRounded)
-        approve.setTag_(index)
-        approve.setTarget_(self)
-        approve.setAction_("approveProposal:")
-        inner.addSubview_(approve)
-
-        skip = NSButton.alloc().initWithFrame_(NSMakeRect(pad + 104, 12, 96, 28))
-        skip.setTitle_(t("assistant.skip"))
-        skip.setBezelStyle_(NSBezelStyleRounded)
-        skip.setTag_(index)
-        skip.setTarget_(self)
-        skip.setAction_("skipProposal:")
-        inner.addSubview_(skip)
+        # 승인 = filled accent (red when irreversible) · 나중에 / 건너뛰기 = subtle
+        approve_rgb = _RISK_RGB[risk.NEVER_AUTO] if klass == risk.NEVER_AUTO \
+            else _ACCENT_BLUE
+        inner.addSubview_(_accent_button(
+            t("assistant.approve"), self, "approveProposal:", index,
+            NSMakeRect(pad, 12, 104, btn_h), approve_rgb))
+        snooze_b = _subtle_button(
+            t("assistant.snooze"), self, "snoozeProposal:", index,
+            NSMakeRect(pad + 112, 12, 96, btn_h))
+        snooze_b.setToolTip_(t("assistant.snooze_tip"))
+        inner.addSubview_(snooze_b)
+        skip_b = _subtle_button(
+            t("assistant.skip"), self, "skipProposal:", index,
+            NSMakeRect(pad + 216, 12, 96, btn_h))
+        skip_b.setToolTip_(t("assistant.skip_tip"))
+        inner.addSubview_(skip_b)
 
         doc.addSubview_(box)
+        return card_h
 
     # -- history sessions ---------------------------------------------------------
 

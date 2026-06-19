@@ -21,6 +21,7 @@ ACTIVE = "active"
 PAUSED = "paused"
 BLOCKED = "blocked"
 DONE = "done"
+ARCHIVED = "archived"  # parked: not nudged (escalation 건너뛰기), hidden from list
 
 
 def _now_iso():
