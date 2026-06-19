@@ -638,3 +638,60 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
   결정#7대로 Google 비공개 ICS 단일 소스(TimeTree는 Google 동기화). later: 멀티소스, Google OAuth
   API, 캘린더 쓰기(confirm)+자동 prep, 진짜 Notification Center 전송.
 - **M13–M18 전 마일스톤 출시 완료.** Telegram 봇 API 도달성은 환경 의존(차단 시 네이티브만).
+- **M19 비서창 UX 재설계 (2026-06-18, 사용자 지시 + 서브에이전트 UX 검토)**: 기존 5버튼
+  툴바(답변/원격/제안/할 일 추가/스캔)를 **입력창+전송 1개**로 축소하고 입력을 **로컬 LLM이
+  라우팅**한다. 흐름: `MainWindow.sendClicked_` → `controller.handleSend_` → ① 결정론 fast-path
+  (메인 스레드, 지연 0): 슬래시 명령(`assistant_slash_commands` config) / 질문 휴리스틱(`?`·의문사
+  로 시작) / "스캔·원격" 키워드 → 즉시 intent. ② 안 걸리면 워커 스레드에서 `engine.route_intent`
+  단일 LLM 호출(`assistant_router_*` 프롬프트, `_llm_json` 재사용) → `{intent}` →
+  `AppHelper.callAfter(_dispatch)`로 메인 복귀. intent(answer/todo/thread/remote/scan)는 기존
+  핸들러(`answer_question`/`handlePropose_`/`new_thread`/`delegate_remote`/`handleScan`)로 분배
+  — 신규 핸들러·신규 LLM 핫패스 없음. fail-safe: LLM 불가/오류/미지 intent → `thread`(수동적
+  메모, 가시적·삭제 가능), remote는 `remote_enabled=False`면 `todo`로 강등(`risk.py` 불변식과
+  동일 철학). 라우팅 중 임시 에코행(`assistantShowRouting_`/`assistantClearRouting`).
+  **하단 리스트 인터랙티브화**: 섹션명을 동작 기준으로(받은 작업함→"비서 제안", 할 일→"진행 중인
+  일", 칸반→"칸반 (읽기 전용)" + passive_hint "스스로 실행 안 함"). 제안 카드 = 색상 위험 칩
+  (proposal_panel와 동일 매핑 재사용) + 결정론 "승인하면 …" 효과줄(`assistant.effect_<kind>`) +
+  승인/나중에(snooze)/건너뛰기. 스레드 카드 = 이어서/완료/삭제(`ThreadStore.touch`/`remove` 재사용,
+  신규 스토어 코드 0) + idle 배지. 칸반은 읽기전용 유지(Hermes DB 절대 쓰지 않음). 카드 액션은
+  기존 `setTag_(index)` 패턴. 검증: 헤드리스 UI 빌드 테스트(전 카드 타입 + 라우팅 에코 렌더, 6언어
+  i18n 키 누락 NSException 없음) + 배포 후 클린 재기동. CLI(`macsist propose|scan`)는 기존 콜백
+  경유라 그대로 동작.
+- **M19-A 이어서 = 비서가 직접 처리 + 실시간 진행 (사용자 피드백)**: ① `이어서` 프롬프트를
+  **에이전트 어조**로 재작성(`assistant.resume_prompt`, 6언어) — 사용자에게 할 일 목록을 주지 말고
+  비서가 다음 단계를 직접 수행해 결과물을 내놓고, 필요한 재료만 짧게 요청. ② **답변 스트림 완료 훅**:
+  `explain_controller.answer_question(text, on_done)` → `_runAnswer`/`_runAnswerHermes`/`_stream`로
+  전달, 모든 종료 경로에서 `_onMain(gen, on_done, ok, text)`로 호출 — `_onMain`이 generation으로
+  게이트하므로 선점된 답변은 보고하지 않음(취소/staleness 하드룰 보존, 스트림 코어 로직 불변).
+  ③ 컨트롤러 `resume_thread`: `main_window.assistantSetThreadBusy_(tid)`로 카드 진행줄을
+  "⏳ 비서가 작업 중…"으로 전환 → 완료 시 `_done(ok,text)`가 busy 해제 + 결과 요약(`_excerpt`)을
+  스레드의 activity/`where_was_i`에 반영(카드가 실제 전진) + refresh. busy는 단일 tid 트랜션트
+  (새 입력/라우팅이 self-heal로 해제). ④ 카드 진행줄: busy면 ⏳, 아니면 최근 activity + 상대시각
+  (방금/N시간 전/N일 전), 색상 상태 점(진행 중/멈춤/완료). ⑤ 액센트 버튼 글자 가운데 정렬 버그 수정
+  (`setAlignment_`/`setImagePosition_`). 한계: 실제 외부 실행(캘린더/파일)은 도구 연동 필요(원격·Gmail만 됨).
+- **M19-B 비서창 전면 UI 재설계 (사용자 지시, 서브에이전트 검토 루프 5라운드·9회 검사)**:
+  넓은 창에서 카드가 늘어지고 버튼 글자가 쏠리던 문제를 구조적으로 해결. ① **중앙 정렬 고정폭
+  컬럼**(`ASSIST_COL_W=860`, `_GUTTER=18`) — `wrap` 서브뷰 + 오토리사이즈 마진으로 어떤 폭에서도
+  가운데 정렬, `windowDidResize_`→`relayoutAssistant`로 라이브 리사이즈 추종. ② **헤드리스
+  지오메트리 감사 하니스**(`app/_uiaudit.py`) — 픽셀을 볼 수 없으니 실제 뷰트리를 폭 540~2000·
+  6개 언어·busy/routing 상태로 측정해 오버플로/클리핑/겹침/세로맞춤/중앙정렬 검증(카드 누적 y
+  버그를 이 하니스가 잡음). ③ **콘텐츠 기반 카드 높이**(각 렌더러가 높이 반환, draw-then-size로
+  정확 누적). ④ **위험 라벨 정정**(never→되돌릴 수 없음, auto→되돌릴 수 있음) + 모든 kind 효과줄
+  (generic fallback) + 효과줄 시맨틱 색. ⑤ **대비 보정 팔레트**(`_C_*` 단일 출처, 흰 글씨 AA-large,
+  다크모드). ⑥ **액션 피드백**: 승인/완료/삭제/건너뛰기/답변 토스트(refresh 경합 회피 1틱 지연 +
+  타이머 누적 취소), 삭제 확인(NSAlert), 수동 새로고침 ↻, 상태 점, 출처 글리프(🖥📧📅), 진행 줄,
+  툴팁(전체 텍스트), 창 최소 크기, 섹션 카운트 `(n)`. ⑦ **resume 데이터 보존**: 결과는
+  `last_result`에 저장(원본 `where_was_i` 유지), 재개 시 둘 다 프롬프트로 전달. 하드룰 준수
+  (메인스레드/셀렉터 arity/리스너 무변경) 회귀검사 통과.
+- **M19-C 능동 제안: 화면 켤 때 우르르 뜨는 문제 + 반복 nudge 에스컬레이션 (사용자 피드백)**:
+  능동 제안은 *끄지 않고* 빈도도 줄이지 않음(필요할 때 언제든 제안). 대신 ① **잠에서 깬 직후의
+  밀린 스캔 스킵**: `ProactiveMonitor._loop`이 wall-clock으로 "타임아웃이 interval+60s를 초과 =
+  sleep이 마감을 넘김"을 감지해 그 catch-up 스캔 1회를 건너뜀(다음 주기·수동 poke는 정상). ②
+  **자리비움/잠금/조용시간엔 패널 미표시**: `_surface`가 `Deliverer.user_present()`(idle<away +
+  화면 잠금 아님 via `CGSessionCopyCurrentDictionary`) && not quiet 일 때만 플로팅 패널을 띄우고,
+  아니면 배지(받은 작업함)+Telegram로만 — 깰 때 우르르 안 뜸. ③ **반복 nudge 에스컬레이션**:
+  같은 스레드 nudge가 `assistant_nudge_escalate_after`(기본 2)회를 넘기면 일반 "이어서" 대신
+  "{n}번째 미뤄둔 일 — 왜 막혔는지" 카드로 바뀜(payload `escalated`). 승인=비서가 이어서 처리
+  (`resume_thread`), 건너뛰기=스레드를 `archived`로 정리(stale 스캔/목록에서 제외 → 더 이상 nudge
+  안 함), 나중에=스누즈. to-do 리스트처럼 같은 알림을 무한 반복하지 않고 "묻고 능동 정리"한다.
+  검증: 오프라인 엔진 테스트(2회 일반→3회째 escalated→skip시 archived) + UI 감사 0 에러.
