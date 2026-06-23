@@ -24,6 +24,13 @@ from assistant import gmail_oauth
 
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
 
+# Gmail system labels that disqualify a message from reply-triage: anything the
+# user sent/drafted, or that isn't real personal inbox mail.
+_SKIP_LABELS = frozenset({
+    "SENT", "DRAFT", "TRASH", "SPAM", "CHAT",
+    "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS",
+})
+
 
 class GmailClient:
     def __init__(self, config):
@@ -83,9 +90,21 @@ class GmailClient:
             latest = data.get("historyId", latest)
             for h in data.get("history", []):
                 for m in h.get("messagesAdded", []):
-                    mid = (m.get("message") or {}).get("id")
-                    if mid:
-                        ids.append(mid)
+                    msg = m.get("message") or {}
+                    mid = msg.get("id")
+                    if not mid:
+                        continue
+                    # Only RECEIVED inbox mail — NEVER what the user sent/drafted.
+                    # history.list("messageAdded") fires on outgoing mail too (it
+                    # lands in SENT), so without this the 비서 proposes replies to
+                    # your own messages. Mirrors the resync filter's is:unread
+                    # in:inbox -category:promotions/social.
+                    labels = set(msg.get("labelIds") or [])
+                    if "INBOX" not in labels:
+                        continue
+                    if labels & _SKIP_LABELS:
+                        continue
+                    ids.append(mid)
             page = data.get("nextPageToken")
             if not page:
                 break
