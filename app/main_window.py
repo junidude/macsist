@@ -212,10 +212,38 @@ _EFFECT_KINDS = frozenset((
 _ACCENT_BLUE = _C_BLUE
 
 
+class _CardBox(NSBox):
+    """A card whose body opens a detail sheet on click. mouseDown bubbles up the
+    responder chain from the (non-control) labels inside, so a click anywhere on
+    the card EXCEPT its action buttons (which consume the event) lands here. The
+    click target/payload are plain attributes — no NSControl tag needed."""
+
+    def initWithFrame_(self, frame):
+        self = objc.super(_CardBox, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._click_target = None
+        self._click_action = None
+        self._card_kind = None   # "thread" | "proposal" | "kanban"
+        self._card_obj = None    # the underlying dict (detail source)
+        return self
+
+    def setClickTarget_action_(self, target, action):
+        self._click_target = target
+        self._click_action = action
+
+    def mouseDown_(self, event):
+        if self._click_target is not None and self._click_action is not None:
+            self._click_target.performSelector_withObject_(
+                self._click_action, self)
+            return
+        objc.super(_CardBox, self).mouseDown_(event)
+
+
 def _card_box(y, card_w, card_h):
     """A near-opaque card with a hairline border — reads cleanly over the glass
     window on any desktop (the half-transparent fill was the muddy look)."""
-    box = NSBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
+    box = _CardBox.alloc().initWithFrame_(NSMakeRect(4, y, card_w, card_h))
     box.setBoxType_(NSBoxCustom)
     box.setTitlePosition_(0)
     box.setBorderType_(1)  # NSLineBorder
@@ -226,6 +254,54 @@ def _card_box(y, card_w, card_h):
     box.setFillColor_(
         NSColor.textBackgroundColor().colorWithAlphaComponent_(0.92))
     return box, box.contentView()
+
+
+def _thread_detail(thread):
+    """(title, body) for the thread detail sheet — full untruncated text."""
+    title = str(thread.get("title") or "—")
+    parts = []
+    where = str(thread.get("where_was_i") or "").strip()
+    nxt = str(thread.get("next_action") or "").strip()
+    last = str(thread.get("last_result") or "").strip()
+    if where:
+        parts.append(f"{t('assistant.detail_where')}\n{where}")
+    if nxt:
+        parts.append(f"{t('assistant.detail_next')}\n{nxt}")
+    if last:
+        parts.append(f"{t('assistant.detail_last')}\n{last}")
+    acts = thread.get("activity") or []
+    if acts:
+        lines = [f"· {str(a.get('note') or a.get('kind') or '').strip()}"
+                 for a in acts[-5:]]
+        parts.append(f"{t('assistant.detail_activity')}\n" + "\n".join(lines))
+    return title, "\n\n".join(parts) or t("assistant.detail_empty")
+
+
+def _proposal_detail(prop):
+    title = str(prop.get("title") or "—")
+    parts = []
+    rat = str(prop.get("rationale") or "").strip()
+    if rat:
+        parts.append(rat)
+    args = (prop.get("payload") or {}).get("args") or {}
+    for key in ("to", "subject", "draft", "body", "command", "text"):
+        val = str(args.get(key) or "").strip()
+        if val:
+            parts.append(f"{key}: {val}")
+    return title, "\n\n".join(parts) or t("assistant.detail_empty")
+
+
+def _kanban_detail(task):
+    title = str(task.get("title") or "—")
+    parts = []
+    body = str(task.get("body") or "").strip()
+    if body:
+        parts.append(body)
+    meta = [f"{k}: {task[k]}" for k in ("status", "assignee", "tenant")
+            if task.get(k)]
+    if meta:
+        parts.append("\n".join(meta))
+    return title, "\n\n".join(parts) or t("assistant.detail_empty")
 
 
 def _accent_button(title, target, action, tag, frame, rgb):
@@ -260,13 +336,41 @@ def _accent_button(title, target, action, tag, frame, rgb):
     return b
 
 
+def _symbol_image(name, point_size):
+    """A point-sized SF Symbol template image, or None if unavailable."""
+    from AppKit import NSImageSymbolConfiguration
+    img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
+    if img is None:
+        return None
+    cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_(
+        point_size, 5)  # 5 == NSFontWeightRegular
+    out = img.imageWithSymbolConfiguration_(cfg)
+    return out if out is not None else img
+
+
+def _glyph_view(name, point_size, color, frame):
+    """A tinted SF-Symbol image view — the modern replacement for the inline
+    emoji glyphs (🖥/📍/✅…). Mirrors the sidebar's icon recipe: a template
+    symbol + setContentTintColor_ is reliable across light/dark with no text-
+    baseline guesswork (which is why we don't inline it into the label)."""
+    from AppKit import NSImageScaleProportionallyUpOrDown
+    icon = NSImageView.alloc().initWithFrame_(frame)
+    img = _symbol_image(name, point_size)
+    if img is not None:
+        icon.setImage_(img)
+    icon.setImageScaling_(NSImageScaleProportionallyUpOrDown)
+    if color is not None:
+        icon.setContentTintColor_(color)
+    return icon
+
+
 # Thread status -> (human i18n label key, dot RGB).
-# thread source -> a small provenance glyph on the card title (external sources
-# only; manual/capture get none so the title stays clean).
-_SOURCE_GLYPH = {
-    "remote": "🖥",
-    "gmail": "📧",
-    "calendar": "📅",
+# thread source -> a small provenance SF Symbol on the card title (external
+# sources only; manual/capture get none so the title stays clean).
+_SOURCE_SYMBOL = {
+    "remote": "desktopcomputer",
+    "gmail": "envelope.fill",
+    "calendar": "calendar",
 }
 _STATUS_META = {
     "active": ("assistant.status_active", _C_GREEN),
@@ -328,6 +432,41 @@ def _session_transcript(session):
         parts.append(f"{t('history.transcript_q')}\n{record.get('input', '')}")
         parts.append(f"{t('history.transcript_a')}\n{record.get('response', '')}")
     return "\n\n".join(parts)
+
+
+class _AssistantDocView(_FlippedView):
+    """The 비서 tab's scroll document, made keyboard-navigable: ↑/↓ move the
+    card selection, Return runs the primary action, Space opens the detail
+    sheet, Esc returns focus to the input field. Delegates the actual logic to
+    its owner (the controller) so the selection model lives in one place."""
+
+    def initWithFrame_(self, frame):
+        self = objc.super(_AssistantDocView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._owner = None
+        return self
+
+    def acceptsFirstResponder(self):
+        return True
+
+    def becomeFirstResponder(self):
+        if self._owner is not None:
+            try:
+                self._owner.kbdEnsureSelection()
+            except Exception as exc:
+                print(f"assistant kbd: ensure error {exc!r}", flush=True)
+        return objc.super(_AssistantDocView, self).becomeFirstResponder()
+
+    def keyDown_(self, event):
+        handled = False
+        if self._owner is not None:
+            try:
+                handled = bool(self._owner.kbdKeyDown_(event))
+            except Exception as exc:  # keyboard nav must never crash the window
+                print(f"assistant kbd: keyDown error {exc!r}", flush=True)
+        if not handled:
+            objc.super(_AssistantDocView, self).keyDown_(event)
 
 
 class _MainWindow(NSWindow):
@@ -477,6 +616,9 @@ class MainWindowController(NSObject):
         self._busy_ts = None      # monotonic stamp → watchdog clears a stuck busy
         self._inbox = []  # pending proposals (index == button tag)
         self._threads = []  # in-progress threads (index == button tag)
+        self._done_limit = 8  # 비서 tab "더 보기" cap for completed threads
+        self._kbd_flat = None  # keyboard selection: flat index into inbox+threads
+        self._kbd_box = None   # the currently-selected card box (for scroll-to)
         self.table = None  # session list (right column)
         self.chat_scroll = None
         self.chat_doc = None
@@ -981,12 +1123,21 @@ class MainWindowController(NSObject):
         field.setPlaceholderString_(t("assistant.input_placeholder"))
         field.setTarget_(self)
         field.setAction_("sendClicked:")  # Return = 전송 (router decides)
+        field.setDelegate_(self)  # ↓ from the field jumps into the card list
         self.assistant_input = field
         wrap.addSubview_(box)
         # manual refresh — "check now" (pokes the proactive scan + re-reads)
         refresh = _make_pill(
-            "↻", self, "refreshClicked:",
+            "", self, "refreshClicked:",
             NSMakeRect(field_w + gap, bar_y + 7, refresh_w, 30))
+        _ri = _symbol_image("arrow.clockwise", 13.0)
+        if _ri is not None:
+            from AppKit import NSImageOnly
+            refresh.setImage_(_ri)
+            refresh.setImagePosition_(NSImageOnly)
+            refresh.setContentTintColor_(NSColor.secondaryLabelColor())
+        else:
+            refresh.setTitle_("↻")  # symbol unavailable → glyph fallback
         refresh.setToolTip_(t("assistant.refresh_tip"))
         refresh.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
         wrap.addSubview_(refresh)
@@ -1003,9 +1154,10 @@ class MainWindowController(NSObject):
             NSViewWidthSizable | NSViewHeightSizable)
         self.assistant_scroll.setHasVerticalScroller_(True)
         self.assistant_scroll.setDrawsBackground_(False)
-        self.assistant_doc = _FlippedView.alloc().initWithFrame_(
+        self.assistant_doc = _AssistantDocView.alloc().initWithFrame_(
             NSMakeRect(0, 0, col_w, 10)
         )
+        self.assistant_doc._owner = self  # keyboard nav delegates to the controller
         self.assistant_scroll.setDocumentView_(self.assistant_doc)
         wrap.addSubview_(self.assistant_scroll)
 
@@ -1023,6 +1175,144 @@ class MainWindowController(NSObject):
         self.refreshAssistant()
         self.assistantToast_(t("assistant.toast_refreshed"))
 
+    def showMoreDone_(self, sender):
+        """Reveal more completed threads (bump the UI cap by a page)."""
+        self._done_limit += 8
+        self.refreshAssistant()
+
+    def cardClicked_(self, sender):
+        """Card body click → a detail sheet with the full, untruncated text
+        (the cards themselves truncate to one line each). Buttons consume their
+        own clicks, so this only fires for the body."""
+        self._showDetailKind_obj_(
+            getattr(sender, "_card_kind", None),
+            getattr(sender, "_card_obj", None))
+
+    def _showDetailKind_obj_(self, kind, obj):
+        if not obj:
+            return
+        if kind == "thread":
+            title, body = _thread_detail(obj)
+        elif kind == "proposal":
+            title, body = _proposal_detail(obj)
+        elif kind == "kanban":
+            title, body = _kanban_detail(obj)
+        else:
+            return
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.setInformativeText_(body)
+        alert.addButtonWithTitle_(t("assistant.detail_close"))
+        alert.runModal()
+
+    # -- keyboard navigation (M-D: ↑/↓ select, Return act, Space detail) ------
+
+    def _kbdRows(self):
+        """The flat, ordered list of keyboard-selectable cards: pending
+        proposals first, then in-progress threads (kanban is read-only)."""
+        return ([("proposal", i) for i in range(len(self._inbox))]
+                + [("thread", i) for i in range(len(self._threads))])
+
+    def _kbdCurrent(self):
+        rows = self._kbdRows()
+        if self._kbd_flat is None or not (0 <= self._kbd_flat < len(rows)):
+            return None
+        return rows[self._kbd_flat]
+
+    def kbdEnsureSelection(self):
+        """First focus on the card list selects the first row (if any)."""
+        if self._kbd_flat is None and self._kbdRows():
+            self._kbd_flat = 0
+            self.refreshAssistant()
+
+    def kbdKeyDown_(self, event):
+        kc = int(event.keyCode())
+        if kc == 125:  # ↓
+            self._kbdMove_(1)
+            return True
+        if kc == 126:  # ↑ — at the top, hand focus back to the input field
+            if not self._kbdMove_(-1):
+                self._focusInput()
+            return True
+        if kc in (36, 76):  # Return / keypad Enter → primary action
+            self._kbdActivate()
+            return True
+        if kc == 49:  # Space → detail sheet
+            self._kbdDetail()
+            return True
+        if kc == 53:  # Esc → clear + back to field
+            self._kbd_flat = None
+            self.refreshAssistant()
+            self._focusInput()
+            return True
+        return False
+
+    def _kbdMove_(self, delta):
+        rows = self._kbdRows()
+        if not rows:
+            return False
+        if self._kbd_flat is None:
+            nxt = 0 if delta > 0 else len(rows) - 1
+        else:
+            nxt = self._kbd_flat + delta
+            if nxt < 0:
+                return False  # caller hands focus back to the input field
+            nxt = min(nxt, len(rows) - 1)
+        self._kbd_flat = nxt
+        self.refreshAssistant()
+        self._kbdScrollToSelected()
+        return True
+
+    def _kbdScrollToSelected(self):
+        if self._kbd_box is not None:
+            try:
+                self.assistant_doc.scrollRectToVisible_(self._kbd_box.frame())
+            except Exception:
+                pass
+
+    def _kbdActivate(self):
+        sel = self._kbdCurrent()
+        if sel is None:
+            return
+        kind, idx = sel
+        if kind == "proposal" and 0 <= idx < len(self._inbox):
+            if self.on_assistant_approve is not None:
+                self.on_assistant_approve(self._inbox[idx].get("id"))
+                self.assistantToast_(t("assistant.toast_approved"))
+        elif kind == "thread" and 0 <= idx < len(self._threads):
+            if self.on_assistant_resume is not None:
+                self.on_assistant_resume(self._threads[idx].get("id"))
+
+    def _kbdDetail(self):
+        sel = self._kbdCurrent()
+        if sel is None:
+            return
+        kind, idx = sel
+        obj = (self._inbox[idx] if kind == "proposal" else self._threads[idx])
+        self._showDetailKind_obj_(kind, obj)
+
+    def _applyKbdHighlight_flat_(self, box, flat):
+        """Accent the card border when it's the keyboard-selected row."""
+        if self._kbd_flat is not None and flat == self._kbd_flat:
+            box.setBorderColor_(NSColor.controlAccentColor())
+            box.setBorderWidth_(2.0)
+            self._kbd_box = box
+
+    def _focusInput(self):
+        if self.window is not None and self.assistant_input is not None:
+            self.window.makeFirstResponder_(self.assistant_input)
+
+    def control_textView_doCommandBySelector_(self, control, textView, selector):
+        """↓ from the input field jumps into the card list (Spotlight-style).
+        Everything else (incl. Return → sendClicked:) keeps default handling."""
+        if (control is self.assistant_input
+                and str(selector) == "moveDown:"
+                and self.window is not None and self.assistant_doc is not None
+                and self._kbdRows()):
+            self.window.makeFirstResponder_(self.assistant_doc)
+            return True
+        return False
+
     def assistantShowRouting_(self, text):
         """Transient echo row pinned above the list while the LLM router runs;
         cleared by the controller's _dispatch before it refreshes the tab."""
@@ -1035,12 +1325,15 @@ class MainWindowController(NSObject):
         # through behind it; sits pinned at the very top while the router runs.
         box, inner = _card_box(4, width - 8, 38)
         from AppKit import NSLineBreakByTruncatingTail
+        inner.addSubview_(_glyph_view(
+            "hourglass", 12.0, NSColor.secondaryLabelColor(),
+            NSMakeRect(12, 11, 15, 15)))
         lbl = NSTextField.labelWithString_(
-            f"⏳ {t('assistant.routing')}  {str(text)[:60]}")
+            f"{t('assistant.routing')}  {str(text)[:60]}")
         lbl.setFont_(NSFont.systemFontOfSize_(12.0))
         lbl.setTextColor_(NSColor.secondaryLabelColor())
         lbl.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        lbl.setFrame_(NSMakeRect(12, 11, width - 8 - 24, 18))
+        lbl.setFrame_(NSMakeRect(33, 11, width - 8 - 45, 18))
         inner.addSubview_(lbl)
         doc.addSubview_(box)
         self._routing_box = box
@@ -1071,11 +1364,15 @@ class MainWindowController(NSObject):
             self._toast_box.removeFromSuperview()
         width = self.assistant_scroll.contentSize().width
         box, inner = _card_box(4, width - 8, 34)
-        lbl = NSTextField.labelWithString_("✓ " + self._pending_toast)
+        inner.addSubview_(_glyph_view(
+            "checkmark", 11.0,
+            NSColor.colorWithRed_green_blue_alpha_(*_C_GREEN, 1.0),
+            NSMakeRect(12, 9, 14, 14)))
+        lbl = NSTextField.labelWithString_(self._pending_toast)
         lbl.setFont_(NSFont.systemFontOfSize_(12.0))
         lbl.setTextColor_(NSColor.secondaryLabelColor())
         lbl.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        lbl.setFrame_(NSMakeRect(12, 9, width - 8 - 24, 18))
+        lbl.setFrame_(NSMakeRect(32, 9, width - 8 - 44, 18))
         inner.addSubview_(lbl)
         doc.addSubview_(box)
         self._toast_box = box
@@ -1153,9 +1450,11 @@ class MainWindowController(NSObject):
         """Re-render the 비서 tab: work threads (M14, "어디까지 했더라") + the
         read-only kanban board (M13). Safe when stores are unset — empty state."""
         threads = []
+        done_total = 0
         if self.assistant_threads is not None:
             try:
-                threads = self.assistant_threads.for_display()
+                threads = self.assistant_threads.for_display(self._done_limit)
+                done_total = self.assistant_threads.done_total()
             except Exception as exc:
                 print(f"assistant tab: thread read error {exc!r}", flush=True)
         tasks = []
@@ -1172,6 +1471,11 @@ class MainWindowController(NSObject):
                 print(f"assistant tab: inbox read error {exc!r}", flush=True)
         self._inbox = inbox
         self._threads = threads  # index == button tag for the card actions
+        # keyboard selection: clamp to the (possibly shrunk) list, drop if empty
+        self._kbd_box = None
+        n_rows = len(inbox) + len(threads)
+        if self._kbd_flat is not None:
+            self._kbd_flat = None if n_rows == 0 else min(self._kbd_flat, n_rows - 1)
         status = {}
         if self.assistant_bridge is not None:
             try:
@@ -1229,6 +1533,16 @@ class MainWindowController(NSObject):
                 y += self._addThreadCardTo_y_width_index_(doc, y, width, i) + gap
         else:
             y = _assistant_empty(doc, y, width, t("assistant.no_threads"))
+        # "더 보기": done threads are capped at self._done_limit so the list
+        # doesn't grow unbounded — surface the cap instead of hiding it silently.
+        if done_total > self._done_limit:
+            remaining = done_total - self._done_limit
+            more = _subtle_button(
+                t("assistant.show_more").format(n=remaining), self,
+                "showMoreDone:", 0, NSMakeRect(4, y, 160, 28))
+            more.setToolTip_(t("assistant.show_more_tip"))
+            doc.addSubview_(more)
+            y += 28 + gap
         if connected:  # external board section only when an agent is connected
             y += 8
             y = _assistant_section(doc, y, width, t("assistant.section_kanban"),
@@ -1261,6 +1575,9 @@ class MainWindowController(NSObject):
         card_h = 80.0 if body else 60.0
         card_w = width - 8
         box, inner = _card_box(y, card_w, card_h)
+        box._card_kind = "kanban"
+        box._card_obj = task
+        box.setClickTarget_action_(self, "cardClicked:")
 
         title_s = str(task.get("title") or "—")
         title = NSTextField.labelWithString_(title_s)
@@ -1327,6 +1644,10 @@ class MainWindowController(NSObject):
         card_h = 14 + 22 + n_lines * line_h + 12 + btn_h + 12
         card_w = width - 8
         box, inner = _card_box(y, card_w, card_h)
+        box._card_kind = "thread"
+        box._card_obj = thread
+        box.setClickTarget_action_(self, "cardClicked:")
+        self._applyKbdHighlight_flat_(box, len(self._inbox) + index)
 
         # colored status dot + title
         status = str(thread.get("status") or "active")
@@ -1343,13 +1664,20 @@ class MainWindowController(NSObject):
         inner.addSubview_(dot)
 
         title_s = str(thread.get("title") or "—")
-        glyph = _SOURCE_GLYPH.get(str(thread.get("source") or ""), "")
-        title = NSTextField.labelWithString_(
-            (glyph + " " + title_s) if glyph else title_s)
+        sym = _SOURCE_SYMBOL.get(str(thread.get("source") or ""))
+        tx = pad + 16  # right of the status dot
+        if sym:
+            inner.addSubview_(_glyph_view(
+                sym, 12.0, NSColor.secondaryLabelColor(),
+                NSMakeRect(tx, card_h - 29, 16, 16)))
+            tx += 20
+        title = NSTextField.labelWithString_(title_s)
         title.setFont_(NSFont.boldSystemFontOfSize_(15.0))
         title.setLineBreakMode_(NSLineBreakByTruncatingTail)
         title.setToolTip_(title_s)
-        title.setFrame_(NSMakeRect(pad + 16, card_h - 31, card_w - 2 * pad - 150, 20))
+        # stop short of the right-corner status (card_w - pad - 150) with a gap
+        title.setFrame_(NSMakeRect(tx, card_h - 31,
+                                   card_w - pad - 158 - tx, 20))
         inner.addSubview_(title)
 
         # corner status stays SHORT (status/⏳ + relative time); the substance of
@@ -1359,52 +1687,59 @@ class MainWindowController(NSObject):
             hrs = self.assistant_threads.idle_hours(thread)
         except Exception:
             hrs = None
+        corner_x = card_w - pad - 150
         busy = (self._busy_thread is not None
                 and str(thread.get("id")) == self._busy_thread)
         if busy:
-            prog = "⏳ " + t("assistant.working")
+            prog = t("assistant.working")
+            # a leading hourglass at the left of the corner region; the label is
+            # narrowed + offset so it can never overlap the icon (right-aligned).
+            inner.addSubview_(_glyph_view(
+                "hourglass", 11.0, NSColor.tertiaryLabelColor(),
+                NSMakeRect(corner_x, card_h - 29, 13, 13)))
+            pl_x, pl_w = corner_x + 18, 132
         else:
             prog = t(label_key)
             when = _rel_time(hrs) if hrs is not None else ""
             if when:
                 prog = f"{prog} · {when}"
+            pl_x, pl_w = corner_x, 150
         pl = NSTextField.labelWithString_(prog)
         pl.setFont_(NSFont.systemFontOfSize_(11.0))
         pl.setAlignment_(NSTextAlignmentRight)
         pl.setTextColor_(NSColor.tertiaryLabelColor())
         pl.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        pl.setFrame_(NSMakeRect(card_w - pad - 150, card_h - 29, 150, 16))
+        pl.setFrame_(NSMakeRect(pl_x, card_h - 29, pl_w, 16))
         inner.addSubview_(pl)
 
+        # body lines: SF-Symbol glyph (mappin / arrow.right / checkmark) + text,
+        # icon at pad and the label indented so every line aligns.
+        ind = 20.0
+
+        def _line(symbol, sym_color, text, text_color, yy):
+            inner.addSubview_(_glyph_view(
+                symbol, 11.0, sym_color, NSMakeRect(pad, yy + 1, 15, 15)))
+            lab = NSTextField.labelWithString_(text)
+            lab.setFont_(NSFont.systemFontOfSize_(12.0))
+            lab.setTextColor_(text_color)
+            lab.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            lab.setToolTip_(text)
+            lab.setFrame_(NSMakeRect(pad + ind, yy, card_w - 2 * pad - ind, 17))
+            inner.addSubview_(lab)
+
+        green = NSColor.colorWithRed_green_blue_alpha_(*_C_GREEN, 1.0)
         ly = card_h - 31 - line_h
         if where:
-            w = NSTextField.labelWithString_("📍 " + where)
-            w.setFont_(NSFont.systemFontOfSize_(12.0))
-            w.setTextColor_(NSColor.secondaryLabelColor())
-            w.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            w.setToolTip_(where)
-            w.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
-            inner.addSubview_(w)
+            _line("mappin", NSColor.secondaryLabelColor(), where,
+                  NSColor.secondaryLabelColor(), ly)
             ly -= line_h
-
         if nxt:
-            n = NSTextField.labelWithString_("→ " + nxt)
-            n.setFont_(NSFont.systemFontOfSize_(12.0))
-            n.setTextColor_(NSColor.labelColor())
-            n.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            n.setToolTip_(nxt)
-            n.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
-            inner.addSubview_(n)
+            _line("arrow.right", NSColor.labelColor(), nxt,
+                  NSColor.labelColor(), ly)
             ly -= line_h
-
         if last:  # what the assistant produced last time you hit 이어서
-            lr = NSTextField.labelWithString_("✅ " + last)
-            lr.setFont_(NSFont.systemFontOfSize_(12.0))
-            lr.setTextColor_(NSColor.secondaryLabelColor())
-            lr.setLineBreakMode_(NSLineBreakByTruncatingTail)
-            lr.setToolTip_(last)
-            lr.setFrame_(NSMakeRect(pad, ly, card_w - 2 * pad, 17))
-            inner.addSubview_(lr)
+            _line("checkmark.circle.fill", green, last,
+                  NSColor.secondaryLabelColor(), ly)
 
         # 이어서 = filled accent · 완료 / 삭제 = subtle
         inner.addSubview_(_accent_button(
@@ -1433,6 +1768,10 @@ class MainWindowController(NSObject):
         card_h = 14 + 22 + n_lines * line_h + 12 + btn_h + 12
         card_w = width - 8
         box, inner = _card_box(y, card_w, card_h)
+        box._card_kind = "proposal"
+        box._card_obj = prop
+        box.setClickTarget_action_(self, "cardClicked:")
+        self._applyKbdHighlight_flat_(box, index)
 
         # risk chip — colored, human-readable (mirrors the floating panel badge)
         klass = str(prop.get("risk") or risk.NEVER_AUTO)

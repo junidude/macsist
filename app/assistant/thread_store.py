@@ -115,15 +115,21 @@ class ThreadStore:
         """Active threads + the most-recent done ones, so completed actions
         (e.g. a sent mail reply, M17) stay visible in the 비서 window without
         being stale-nudge targets (the engine only scans active()). all() is
-        already sorted by recency."""
+        already sorted by recency. `done_limit` is the UI cap (the 비서 tab
+        bumps it via its "더 보기" affordance); None = no cap."""
         active, done = [], []
         for t in self.all():
             status = t.get("status")
             if status == ACTIVE:
                 active.append(t)
-            elif status == DONE and len(done) < done_limit:
+            elif status == DONE and (done_limit is None or len(done) < done_limit):
                 done.append(t)
         return active + done
+
+    def done_total(self):
+        """How many DONE threads exist in total — lets the 비서 tab decide
+        whether to show "더 보기" (shown done = min(done_total, done_limit))."""
+        return sum(1 for t in self.all() if t.get("status") == DONE)
 
     @staticmethod
     def idle_hours(thread):

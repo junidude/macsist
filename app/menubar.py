@@ -122,6 +122,12 @@ class StatusItemController(NSObject):
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 float(open_history), self, "openHistory:", None, False
             )
+        open_assistant = os.environ.get("HE_DEBUG_OPEN_ASSISTANT")
+        if open_assistant:  # verify the (most complex) 비서 tab build path live
+            from Foundation import NSTimer
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                float(open_assistant), self, "openAssistant:", None, False
+            )
         return self
 
     def debugOpenMenu_(self, timer):

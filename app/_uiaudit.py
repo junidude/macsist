@@ -23,6 +23,7 @@ import main_window as mw
 
 _THREADS = [
     {"id": "t1", "title": "내일 오후 2시 회의 일정 확인", "status": "active",
+     "source": "gmail",  # exercises the SF-Symbol source glyph + title indent
      "where_was_i": "회의 일정을 확인하다가 중단", "next_action": "상세 일정·자료 확인",
      "last_touched_ts": "2026-06-18T10:00:00+09:00",
      "activity": [{"ts": "2026-06-18T16:00:00+09:00", "kind": "resumed",
@@ -34,6 +35,13 @@ _THREADS = [
     {"id": "t3", "title": "춤을춰", "status": "done", "where_was_i": "춤을춰",
      "next_action": "", "last_touched_ts": "2026-06-18T09:00:00+09:00",
      "activity": []},
+]
+# enough DONE threads to exceed the 8-item display cap → exercises "더 보기"
+_THREADS += [
+    {"id": f"d{i}", "title": f"완료된 작업 {i}", "status": "done",
+     "where_was_i": f"작업 {i} 완료", "next_action": "",
+     "last_touched_ts": "2026-06-15T09:00:00+09:00", "activity": []}
+    for i in range(12)
 ]
 _PROPS = [
     {"id": "p1", "kind": "todo_add", "risk": "auto", "title": "보고서 마감",
@@ -50,8 +58,15 @@ class _Threads:
     def idle_hours(t):
         return 6.7
 
-    def for_display(self):
-        return _THREADS
+    def for_display(self, done_limit=8):
+        active = [t for t in _THREADS if t.get("status") == "active"]
+        done = [t for t in _THREADS if t.get("status") == "done"]
+        if done_limit is not None:
+            done = done[:done_limit]
+        return active + done
+
+    def done_total(self):
+        return sum(1 for t in _THREADS if t.get("status") == "done")
 
     def get(self, tid):
         return next((t for t in _THREADS if t["id"] == tid), None)
@@ -177,6 +192,14 @@ def audit(width):
     allviews = []
     _walk(doc, doc, allviews)
     cards = [v for v in doc.subviews()]
+    # every content card (_CardBox) must be wired for the click→detail sheet
+    card_boxes = [v for v in cards if type(v).__name__ == "_CardBox"]
+    clickable = [v for v in card_boxes
+                 if getattr(v, "_click_target", None) is not None
+                 and getattr(v, "_card_obj", None) is not None]
+    if card_boxes and len(clickable) != len(card_boxes):
+        errors.append(f"card click not wired: {len(clickable)}/{len(card_boxes)} "
+                      f"clickable")
     for card in cards:
         cx, cy, cw, ch = _abs_frame(card, doc)
         if cw > col_w + 0.5:
@@ -225,6 +248,20 @@ def audit(width):
                         and ay < by + bh and by < ay + bh):
                     errors.append(
                         f"button overlap: {btns[i].title()!r} ↔ {btns[j].title()!r}")
+
+    # keyboard selection: selecting the first row must highlight exactly one
+    # card (accent, 2px border) and leave geometry unchanged.
+    mwc._kbd_flat = 0
+    mwc.refreshAssistant()
+    sel_boxes = [v for v in mwc.assistant_doc.subviews()
+                 if type(v).__name__ == "_CardBox"
+                 and abs(float(v.borderWidth()) - 2.0) < 0.01]
+    if len(sel_boxes) != 1:
+        errors.append(f"kbd highlight: {len(sel_boxes)} cards at 2px border "
+                      f"(expected exactly 1 selected)")
+    if mwc._kbd_box is None:
+        errors.append("kbd highlight: _kbd_box not set after selection")
+    mwc._kbd_flat = None
 
     return errors, warns, notes
 
