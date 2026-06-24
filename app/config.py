@@ -216,8 +216,10 @@ DEFAULTS = {
     # ── M17 Gmail (REST + Keychain OAuth; collection/triage/draft all in-app) ─
     "gmail_enabled": False,                 # opt-in poller (OFF by default)
     "gmail_poll_interval": 300.0,           # seconds between inbox polls
-    # Gmail search filter for what counts as "needs a look" (resync path)
-    "gmail_query_filter": ("is:unread newer_than:2d "
+    # Gmail search filter for what counts as "needs a look" (resync path).
+    # in:inbox -in:sent keep own/self-sent mail out of reply-triage even on a
+    # resync (the label gate in gmail_monitor is the authoritative backstop).
+    "gmail_query_filter": ("is:unread in:inbox -in:sent newer_than:2d "
                            "-category:promotions -category:social"),
     "gmail_account": "",                    # the address being watched (display)
     "gmail_max_triage_per_poll": 15,        # cap messages digested per poll
@@ -265,6 +267,12 @@ _SUPERSEDED_DEFAULTS = {
         {"/답변": "answer", "/answer": "answer", "/기억": "thread",
          "/note": "thread", "/할일": "todo", "/todo": "todo", "/원격": "remote",
          "/remote": "remote", "/스캔": "scan", "/scan": "scan"},
+    ),
+    # M19 stabilization: the resync filter shipped without in:inbox/-in:sent, so
+    # a cursor-expiry resync could triage the user's own unread mail. Drop the
+    # old default so the tightened filter applies (custom filters untouched).
+    "gmail_query_filter": (
+        "is:unread newer_than:2d -category:promotions -category:social",
     ),
     # 창 가독성(사용자 피드백): 0.5는 옛 glass_window_tint_alpha 기본값이 새 키로
     # 새어든 것 — 사용자가 직접 고른 값이 아니면 0.9(불투명) 기본으로 끌어올린다.

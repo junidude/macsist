@@ -19,7 +19,7 @@ from PyObjCTools import AppHelper
 
 from config import CONFIG_DIR
 
-from assistant.gmail_client import GmailClient
+from assistant.gmail_client import GmailClient, is_triageable
 
 GMAIL_STATE_PATH = CONFIG_DIR / "assistant_gmail_state.json"
 _RING_MAX = 500
@@ -132,8 +132,15 @@ class GmailMonitor:
         metas = []
         for mid in new_ids:
             meta = self.client.get_meta(mid)
-            if not meta.get("error"):
-                metas.append(meta)
+            if meta.get("error"):
+                continue
+            # resync / first-run reach here via messages.list, which (unlike the
+            # incremental history path) does NOT pre-filter by label — apply the
+            # same invariant so a self-sent/own unread mail never gets a reply
+            # proposal even on a cursor-expiry resync.
+            if not is_triageable(meta.get("labels")):
+                continue
+            metas.append(meta)
         self.state.remember(new_ids)
         if history_id:
             self.state.commit(history_id, _now())

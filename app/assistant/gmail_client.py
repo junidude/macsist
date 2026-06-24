@@ -32,6 +32,17 @@ _SKIP_LABELS = frozenset({
 })
 
 
+def is_triageable(labels):
+    """The single label invariant for "reply-triage this?": real received
+    inbox mail only. Shared by BOTH the incremental (history.list) and the
+    resync/first-run (messages.list) paths so neither can propose a reply to
+    the user's own sent/drafted mail. A self-sent message carries INBOX *and*
+    SENT, so the INBOX check alone is not enough — the skip set is what drops
+    it (this is what the resync path was missing pre-fix)."""
+    labels = set(labels or [])
+    return "INBOX" in labels and not (labels & _SKIP_LABELS)
+
+
 class GmailClient:
     def __init__(self, config):
         self.config = config
@@ -97,12 +108,9 @@ class GmailClient:
                     # Only RECEIVED inbox mail — NEVER what the user sent/drafted.
                     # history.list("messageAdded") fires on outgoing mail too (it
                     # lands in SENT), so without this the 비서 proposes replies to
-                    # your own messages. Mirrors the resync filter's is:unread
-                    # in:inbox -category:promotions/social.
-                    labels = set(msg.get("labelIds") or [])
-                    if "INBOX" not in labels:
-                        continue
-                    if labels & _SKIP_LABELS:
+                    # your own messages. Same invariant the resync path applies
+                    # to its get_meta labels (is_triageable).
+                    if not is_triageable(msg.get("labelIds")):
                         continue
                     ids.append(mid)
             page = data.get("nextPageToken")
@@ -131,7 +139,9 @@ class GmailClient:
 
     def get_meta(self, msg_id):
         """Headers + snippet only (no body download). Returns a flat dict:
-        {id, thread_id, from, subject, date, snippet, message_id_header}."""
+        {id, thread_id, from, subject, date, snippet, message_id_header,
+        labels}. `labels` lets the resync path apply the same is_triageable
+        gate as the incremental path (format=metadata still returns labelIds)."""
         data = self._request(
             "GET", f"/messages/{msg_id}",
             params={"format": "metadata",
@@ -148,6 +158,7 @@ class GmailClient:
             "date": headers.get("date", ""),
             "message_id_header": headers.get("message-id", ""),
             "snippet": data.get("snippet", ""),
+            "labels": data.get("labelIds") or [],
         }
 
     def get_body(self, msg_id, limit=4000):
