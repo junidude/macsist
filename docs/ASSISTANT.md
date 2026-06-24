@@ -695,3 +695,15 @@ best-effort 워커). `assistant_telegram_enabled`(기본 OFF)/`assistant_telegra
   (`resume_thread`), 건너뛰기=스레드를 `archived`로 정리(stale 스캔/목록에서 제외 → 더 이상 nudge
   안 함), 나중에=스누즈. to-do 리스트처럼 같은 알림을 무한 반복하지 않고 "묻고 능동 정리"한다.
   검증: 오프라인 엔진 테스트(2회 일반→3회째 escalated→skip시 archived) + UI 감사 0 에러.
+- **M19-D Gmail 수정 + 새 메일 작성 대행 (사용자 피드백)**: ① **버그**: 증분 폴링
+  `history.list(messageAdded)`이 사용자가 *보낸* 메일(SENT)까지 잡아 자기 메일에 답장을 제안 →
+  `labelIds`로 필터(INBOX 필수, SENT/DRAFT/TRASH/SPAM/CHAT·promo/social/forums 제외 = resync의
+  is:unread in:inbox 필터와 일치). ② **신규 기능 `compose`**: 단일 입력 라우터에 의도 추가
+  (config `assistant_router_intents`+`compose`, 슬래시 `/메일`·`/mail`, 라우터 프롬프트). "○○에게
+  ~ 메일 써줘" → `GmailTriager.compose`가 로컬 LLM으로 {to,subject,draft} 추출 →
+  `controller.handleCompose_`가 **reply_draft 제안 재사용**(thread 없는 새 초안) → 패널에서 검토/AI
+  수정 → 승인=Gmail DRAFT 생성 → send_reply 카드 "지금 보내기"(2단계 전송, never_auto 유지).
+  gmail 미연결 시 토스트 안내. ③ **config 마이그레이션**: M19 첫 실행에 디스크로 새어든 옛
+  router_intents/slash 맵을 `_SUPERSEDED_DEFAULTS`로 드롭해 compose 기본값이 적용되게 함. 6개 언어
+  i18n(compose 프롬프트/UI/라우터 절). 검증: 슬래시 라우팅·LLM 추출(mock)·제안 payload·prompt
+  6언어 해석 + UI 감사 0 에러.

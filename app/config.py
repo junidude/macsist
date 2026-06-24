@@ -171,13 +171,15 @@ DEFAULTS = {
     # ── Single-input router: the 비서 tab's one box routes free text to a
     #    handler via the local LLM (assistant_router_* prompts). The allowed
     #    intent set and the deterministic slash overrides are tunables.
-    "assistant_router_intents": ["answer", "todo", "thread", "remote", "scan"],
+    "assistant_router_intents": ["answer", "todo", "thread", "remote", "scan",
+                                 "compose"],
     "assistant_slash_commands": {
         "/답변": "answer", "/answer": "answer",
         "/기억": "thread", "/note": "thread",
         "/할일": "todo", "/todo": "todo",
         "/원격": "remote", "/remote": "remote",
         "/스캔": "scan", "/scan": "scan",
+        "/메일": "compose", "/mail": "compose", "/compose": "compose",
     },
     "assistant_quiet_hours": [22, 8],       # [start_h, end_h] — no nudges
     # M15 Telegram delivery (via `hermes send`, no gateway needed). Off by
@@ -253,6 +255,17 @@ DEFAULTS = {
 # on-disk value still equals a stale default the user never customized it —
 # drop it and let the current default apply. Customized values are never touched.
 _SUPERSEDED_DEFAULTS = {
+    # M19-D: the pre-compose router intent list / slash map leaked to disk on the
+    # first M19 run — drop them so the compose-enabled defaults apply (otherwise
+    # "메일 써줘" / "/메일" never route to compose).
+    "assistant_router_intents": (
+        ["answer", "todo", "thread", "remote", "scan"],
+    ),
+    "assistant_slash_commands": (
+        {"/답변": "answer", "/answer": "answer", "/기억": "thread",
+         "/note": "thread", "/할일": "todo", "/todo": "todo", "/원격": "remote",
+         "/remote": "remote", "/스캔": "scan", "/scan": "scan"},
+    ),
     # 창 가독성(사용자 피드백): 0.5는 옛 glass_window_tint_alpha 기본값이 새 키로
     # 새어든 것 — 사용자가 직접 고른 값이 아니면 0.9(불투명) 기본으로 끌어올린다.
     "window_tint_alpha": (0.5,),
@@ -303,7 +316,8 @@ _LANG_KEYS = ("system_prompt_text", "system_prompt_image",
               "assistant_router_system", "assistant_router_user",
               # M17 Gmail prompts (per-language)
               "gmail_triage_system", "gmail_triage_user",
-              "gmail_revise_system", "gmail_revise_user")
+              "gmail_revise_system", "gmail_revise_user",
+              "gmail_compose_system", "gmail_compose_user")
 
 
 def _migrate_providers(on_disk):

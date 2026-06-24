@@ -196,6 +196,11 @@ STRINGS = {
         "assistant.just_now": "방금",
         "assistant.min_ago": "{m}분 전",
         "assistant.working": "비서가 작업 중…",
+        "assistant.compose_title": "새 메일 초안: {subject}",
+        "assistant.compose_rationale": "받는사람: {to} · 검토 후 보내세요 (초안만 생성)",
+        "assistant.compose_no_gmail": "Gmail 연결이 필요해요 — 설정에서 연결하세요",
+        "assistant.compose_failed": "메일 초안을 만들지 못했어요 — 다시 말씀해 주세요",
+        "assistant.compose_untitled": "(제목 없음)",
         "assistant.toast_approved": "승인했어요",
         "assistant.toast_skipped": "건너뛰었어요",
         "assistant.toast_snoozed": "나중에 다시 알릴게요",
@@ -526,6 +531,11 @@ STRINGS = {
         "assistant.just_now": "just now",
         "assistant.min_ago": "{m}m ago",
         "assistant.working": "Assistant working…",
+        "assistant.compose_title": "New email draft: {subject}",
+        "assistant.compose_rationale": "To: {to} · review before sending (draft only)",
+        "assistant.compose_no_gmail": "Gmail isn't connected — connect it in Settings",
+        "assistant.compose_failed": "Couldn't draft the email — try rephrasing",
+        "assistant.compose_untitled": "(no subject)",
         "assistant.toast_approved": "Approved",
         "assistant.toast_skipped": "Skipped",
         "assistant.toast_snoozed": "Snoozed",
@@ -832,6 +842,11 @@ STRINGS = {
         "assistant.just_now": "刚刚",
         "assistant.min_ago": "{m}分钟前",
         "assistant.working": "助手处理中…",
+        "assistant.compose_title": "新邮件草稿：{subject}",
+        "assistant.compose_rationale": "收件人：{to} · 发送前请检查（仅草稿）",
+        "assistant.compose_no_gmail": "需要先连接 Gmail — 请在设置中连接",
+        "assistant.compose_failed": "无法生成邮件草稿 — 请换个说法",
+        "assistant.compose_untitled": "（无主题）",
         "assistant.toast_approved": "已批准",
         "assistant.toast_skipped": "已跳过",
         "assistant.toast_snoozed": "稍后提醒",
@@ -1139,6 +1154,11 @@ STRINGS = {
         "assistant.just_now": "たった今",
         "assistant.min_ago": "{m}分前",
         "assistant.working": "アシスタントが作業中…",
+        "assistant.compose_title": "新規メール下書き: {subject}",
+        "assistant.compose_rationale": "宛先: {to} · 送信前に確認（下書きのみ）",
+        "assistant.compose_no_gmail": "Gmail の接続が必要です — 設定で接続してください",
+        "assistant.compose_failed": "メール下書きを作成できませんでした — 言い換えてください",
+        "assistant.compose_untitled": "（件名なし）",
         "assistant.toast_approved": "承認しました",
         "assistant.toast_skipped": "スキップしました",
         "assistant.toast_snoozed": "後で通知します",
@@ -1446,6 +1466,11 @@ STRINGS = {
         "assistant.just_now": "à l'instant",
         "assistant.min_ago": "il y a {m} min",
         "assistant.working": "L'assistant travaille…",
+        "assistant.compose_title": "Brouillon d'e-mail : {subject}",
+        "assistant.compose_rationale": "À : {to} · vérifiez avant l'envoi (brouillon)",
+        "assistant.compose_no_gmail": "Gmail n'est pas connecté — connectez-le dans Réglages",
+        "assistant.compose_failed": "Impossible de rédiger l'e-mail — reformulez",
+        "assistant.compose_untitled": "(sans objet)",
         "assistant.toast_approved": "Approuvé",
         "assistant.toast_skipped": "Ignoré",
         "assistant.toast_snoozed": "Reporté",
@@ -1753,6 +1778,11 @@ STRINGS = {
         "assistant.just_now": "gerade eben",
         "assistant.min_ago": "vor {m} Min.",
         "assistant.working": "Assistent arbeitet…",
+        "assistant.compose_title": "Neuer E-Mail-Entwurf: {subject}",
+        "assistant.compose_rationale": "An: {to} · vor dem Senden prüfen (nur Entwurf)",
+        "assistant.compose_no_gmail": "Gmail ist nicht verbunden — in Einstellungen verbinden",
+        "assistant.compose_failed": "E-Mail-Entwurf fehlgeschlagen — anders formulieren",
+        "assistant.compose_untitled": "(kein Betreff)",
         "assistant.toast_approved": "Genehmigt",
         "assistant.toast_skipped": "Übersprungen",
         "assistant.toast_snoozed": "Zurückgestellt",
@@ -2001,9 +2031,11 @@ PROMPT_DEFAULTS = {
             "remote: 원격 서버에서 실행해달라는 요청; "
             "scan: 지금 할 일이 있는지 점검해달라는 요청. "
             "명령형 요청('~해줘')은 todo, 선언형 메모('~하던 중')는 thread로. "
-            "애매하면 thread를 골라라."
+            "compose: 보낼 새 이메일을 대신 써달라는 요청(예: '○○에게 ~ 메일 써줘'). 애매하면 thread를 골라라."
         ),
         "assistant_router_user": "입력:\n<<TEXT>>",
+        "gmail_compose_system": "너는 사용자가 보낼 새 이메일을 대신 작성하는 비서다. 요청을 보고 받는사람(to)·제목(subject)·본문(draft)을 정한다. 요청에 이메일 주소가 있으면 그대로 쓰고, 이름만 있으면 그 이름을 넣어라(사용자가 Gmail에서 고친다). 본문은 요청과 같은 언어로 정중하고 자연스럽게. 반드시 JSON 객체 하나만 출력: {\"to\": \"...\", \"subject\": \"...\", \"draft\": \"...\"}. 다른 말은 절대 쓰지 마라.",
+        "gmail_compose_user": "요청:\n<<REQUEST>>",
         "detail_levels": {
             "brief": {
                 "label": "간단",
@@ -2079,9 +2111,11 @@ PROMPT_DEFAULTS = {
             "remote: a request to run something on the remote server; "
             "scan: a request to check whether there's anything to do now. "
             "Imperative requests ('do X') are todo; declarative notes ('working on X') "
-            "are thread. When unsure, choose thread."
+            "are thread. compose: a request to write a NEW outgoing email to send (e.g. 'email Bob about ~'). When unsure, choose thread."
         ),
         "assistant_router_user": "Input:\n<<TEXT>>",
+        "gmail_compose_system": "You compose a NEW outgoing email for the user. From the request decide to / subject / draft (body). Use an email address if the request has one; if only a name, put the name (the user fixes it in Gmail). Write the body politely and naturally in the same language as the request. Output ONLY one JSON object: {\"to\": \"...\", \"subject\": \"...\", \"draft\": \"...\"}. No other text.",
+        "gmail_compose_user": "Request:\n<<REQUEST>>",
         "detail_levels": {
             "brief": {
                 "label": "Brief",
@@ -2142,9 +2176,11 @@ PROMPT_DEFAULTS = {
             "remote：请求在远程服务器上运行；"
             "scan：请求检查现在有没有要做的事。"
             "祈使式请求（“帮我做X”）归为 todo，陈述式备忘（“正在做X”）归为 thread。"
-            "拿不准时选 thread。"
+            "compose：请求代写一封要发送的新邮件（如\"给○○写关于~的邮件\"）。拿不准时选 thread。"
         ),
         "assistant_router_user": "输入:\n<<TEXT>>",
+        "gmail_compose_system": "你为用户代写一封要发送的新邮件。根据请求确定收件人(to)、主题(subject)、正文(draft)。请求中有邮箱地址就用它；只有名字就填名字（用户在 Gmail 中修改）。正文用与请求相同的语言，礼貌自然地书写。只输出一个 JSON 对象：{\"to\": \"...\", \"subject\": \"...\", \"draft\": \"...\"}，不要输出其他内容。",
+        "gmail_compose_user": "请求:\n<<REQUEST>>",
         "detail_levels": {
             "brief": {
                 "label": "简短",
@@ -2208,9 +2244,11 @@ PROMPT_DEFAULTS = {
             "remote: リモートサーバーで実行してほしいという依頼; "
             "scan: いま何かやることがあるか点検してほしいという依頼。"
             "命令形の依頼（「〜して」）は todo、宣言的なメモ（「〜している途中」）は thread。"
-            "迷ったら thread を選べ。"
+            "compose: 送る新しいメールを書いてほしいという依頼（例:「○○宛に~のメールを書いて」）。迷ったら thread を選べ。"
         ),
         "assistant_router_user": "入力:\n<<TEXT>>",
+        "gmail_compose_system": "あなたはユーザーが送る新しいメールを代わりに作成するアシスタントだ。依頼から宛先(to)・件名(subject)・本文(draft)を決める。依頼にメールアドレスがあればそれを使い、名前だけなら名前を入れる(ユーザーが Gmail で修正)。本文は依頼と同じ言語で丁寧かつ自然に。必ず JSON オブジェクトを一つだけ出力: {\"to\": \"...\", \"subject\": \"...\", \"draft\": \"...\"}。他の文章は一切書くな。",
+        "gmail_compose_user": "依頼:\n<<REQUEST>>",
         "detail_levels": {
             "brief": {
                 "label": "簡単",
@@ -2282,9 +2320,11 @@ PROMPT_DEFAULTS = {
             "remote : une demande d'exécution sur le serveur distant ; "
             "scan : une demande de vérifier s'il y a quelque chose à faire maintenant. "
             "Les demandes impératives (« fais X ») sont todo, les notes déclaratives "
-            "(« je travaille sur X ») sont thread. En cas de doute, choisis thread."
+            "(« je travaille sur X ») sont thread. compose : une demande d'écrire un nouvel e-mail à envoyer (ex. « écris un mail à Bob au sujet de ~ »). En cas de doute, choisis thread."
         ),
         "assistant_router_user": "Entrée :\n<<TEXT>>",
+        "gmail_compose_system": "Tu rédiges un NOUVEL e-mail sortant pour l'utilisateur. À partir de la demande, choisis destinataire (to) / objet (subject) / corps (draft). Utilise une adresse e-mail si la demande en contient une ; sinon mets le nom (l'utilisateur corrige dans Gmail). Rédige le corps poliment et naturellement dans la langue de la demande. Produis UNIQUEMENT un objet JSON : {\"to\": \"...\", \"subject\": \"...\", \"draft\": \"...\"}. Aucun autre texte.",
+        "gmail_compose_user": "Demande :\n<<REQUEST>>",
         "detail_levels": {
             "brief": {
                 "label": "Bref",
@@ -2356,9 +2396,11 @@ PROMPT_DEFAULTS = {
             "remote: eine Bitte, etwas auf dem Remote-Server auszuführen; "
             "scan: eine Bitte zu prüfen, ob es jetzt etwas zu tun gibt. "
             "Imperative Bitten („mach X“) sind todo, deklarative Notizen "
-            "(„arbeite an X“) sind thread. Im Zweifel wähle thread."
+            "(„arbeite an X“) sind thread. compose: die Bitte, eine neue zu sendende E-Mail zu schreiben (z. B. „schreib Bob eine Mail wegen ~“). Im Zweifel wähle thread."
         ),
         "assistant_router_user": "Eingabe:\n<<TEXT>>",
+        "gmail_compose_system": "Du verfasst eine NEUE ausgehende E-Mail für den Nutzer. Bestimme aus der Anfrage Empfänger (to) / Betreff (subject) / Text (draft). Nutze eine E-Mail-Adresse, falls die Anfrage eine enthält; sonst setze den Namen (der Nutzer korrigiert in Gmail). Schreibe den Text höflich und natürlich in der Sprache der Anfrage. Gib NUR ein JSON-Objekt aus: {\"to\": \"...\", \"subject\": \"...\", \"draft\": \"...\"}. Kein weiterer Text.",
+        "gmail_compose_user": "Anfrage:\n<<REQUEST>>",
         "detail_levels": {
             "brief": {
                 "label": "Kurz",

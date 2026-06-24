@@ -112,6 +112,28 @@ class GmailTriager:
             self.llm, self.config,
             str(self.config.get("gmail_revise_system")), user) or None
 
+    def compose(self, request):
+        """Free-text request → a NEW outgoing mail draft (the 비서 writes mail
+        the user wants to SEND, vs. triage which replies to received mail).
+        Returns {to, subject, draft} or None (LLM unavailable / empty). The
+        recipient may be a name — the user fixes it in the Gmail draft."""
+        request = str(request or "").strip()
+        if not request:
+            return None
+        user = str(self.config.get("gmail_compose_user")).replace(
+            "<<REQUEST>>", request)
+        data = extract_json(complete_text(
+            self.llm, self.config,
+            str(self.config.get("gmail_compose_system")), user))
+        if not isinstance(data, dict):
+            return None
+        draft = str(data.get("draft") or data.get("body") or "").strip()
+        if not draft:
+            return None
+        return {"to": str(data.get("to") or "").strip(),
+                "subject": str(data.get("subject") or "").strip(),
+                "draft": draft}
+
     def _llm_pick(self, digest):
         user = str(self.config.get("gmail_triage_user")).replace(
             "<<DIGEST>>", digest)

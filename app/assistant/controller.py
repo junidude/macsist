@@ -296,8 +296,59 @@ class AssistantController:
             self.handleScan()
         elif intent == "thread":
             self.new_thread(text)
+        elif intent == "compose":
+            self.handleCompose_(text)
         else:  # "todo"/"propose" and any unmapped value
             self.handlePropose_(text)
+
+    # == compose a new outgoing mail (M19-D) =================================
+
+    def handleCompose_(self, text):
+        """Router 'compose' intent: the 비서 writes a NEW outgoing email the user
+        wants to SEND (vs. replying to received mail). LLM drafts it off-thread →
+        a reply_draft proposal (reuses the DRAFT→2-step-send pipeline)."""
+        text = (text or "").strip()
+        if not text:
+            return
+        if not bool(self.config.get("gmail_enabled")):
+            try:
+                self.main_window.assistantToast_(t("assistant.compose_no_gmail"))
+            except Exception:
+                pass
+            print("compose: gmail disabled", flush=True)
+            return
+        threading.Thread(target=self._composeWorker, args=(text,),
+                         name="gmail-compose", daemon=True).start()
+
+    def _composeWorker(self, text):
+        data = None
+        try:
+            data = self.gmail_triager.compose(text)
+        except Exception as exc:  # never crash the worker
+            print(f"compose: error {exc!r}", flush=True)
+        AppHelper.callAfter(self._composeProposal, data)
+
+    def _composeProposal(self, data):
+        if not data:
+            try:
+                self.main_window.assistantToast_(t("assistant.compose_failed"))
+            except Exception:
+                pass
+            return
+        subject = data.get("subject") or t("assistant.compose_untitled")
+        # reuse reply_draft (risk=confirm): approve → Gmail DRAFT → send_reply
+        # card → explicit "지금 보내기". A new mail is just a draft with no thread.
+        self.engine.propose(
+            kind="reply_draft",
+            title=t("assistant.compose_title").format(subject=subject)[:200],
+            rationale=t("assistant.compose_rationale").format(
+                to=data.get("to") or "—"),
+            source="compose",
+            payload={"action": "create_draft", "args": {
+                "to": data.get("to", ""), "subject": subject,
+                "draft": data.get("draft", "")}},
+        )
+        self._refresh()
 
     def _strip_slash(self, text):
         """Drop a leading slash-command token so the handler sees clean text."""
