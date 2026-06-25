@@ -231,6 +231,19 @@ def audit(width):
                     warns.append(f"clipped text need={need:.0f} "
                                  f"frame_w={w:.0f} :: {label[:30]!r}")
 
+    # alignment trap: in this AppKit binding NSTextAlignmentCenter==1 and
+    # ==2 is RIGHT. A pill button whose title is right-aligned clips its last
+    # glyph at the rounded corner (the 승인/이어서 "박살난" bug). No card button
+    # should be right-aligned.
+    for v in allviews:
+        if isinstance(v, NSButton):
+            try:
+                if int(v.alignment()) == 2:
+                    errors.append(f"button right-aligned (==2, clips at corner): "
+                                  f"{str(v.title())[:20]!r}")
+            except Exception:
+                pass
+
     # button overlap inside cards
     for card in cards:
         btns = []

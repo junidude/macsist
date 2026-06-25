@@ -61,6 +61,7 @@ from AppKit import (
     NSTableViewStyleSourceList,
     NSTabView,
     NSTabViewItem,
+    NSTextAlignmentCenter,
     NSTextField,
     NSToolbar,
     NSToolbarDisplayModeIconOnly,
@@ -306,30 +307,23 @@ def _kanban_detail(task):
 
 def _accent_button(title, target, action, tag, frame, rgb):
     """A filled, white-label pill for the primary action on a card (승인/이어서).
-    Plain NSButton (not PillButton) so the fixed fill isn't reset on hover. The
-    NSBezelStyleRegularSquare + centered paragraph style is the same recipe the
-    floating proposal panel uses to center white pill titles reliably."""
-    from AppKit import NSBezelStyleRegularSquare, NSNoImage
-
+    Same layer recipe as _make_pill (borderless + layer fill + centered title),
+    which centers reliably, plus a fixed accent fill + white title. We do NOT set
+    NSBezelStyleRegularSquare: on narrow buttons it inset/left-shifted the title
+    so the last glyph clipped at the rounded corner (e.g. "이어서" → "이어ㅅ").
+    Plain NSButton (not PillButton) so the fixed fill isn't reset on hover."""
     b = NSButton.alloc().initWithFrame_(frame)
-    b.setBezelStyle_(NSBezelStyleRegularSquare)
     b.setBordered_(False)
-    b.setImagePosition_(NSNoImage)  # no image slot to push the title sideways
+    b.setTitle_(title)  # plain title — centers reliably (the attributed-title
+    b.setFont_(NSFont.boldSystemFontOfSize_(13.0))  # path rendered it right-aligned)
+    b.setAlignment_(NSTextAlignmentCenter)  # NB: center==1 here, NOT 2 (==right)
+    b.setContentTintColor_(NSColor.whiteColor())  # white label on the accent fill
     b.setWantsLayer_(True)
     b.layer().setCornerRadius_(frame.size.height / 2.0)
     b.layer().setMasksToBounds_(True)
     r, g, bl = rgb
     b.layer().setBackgroundColor_(
         NSColor.colorWithRed_green_blue_alpha_(r, g, bl, 1.0).CGColor())
-    para = NSMutableParagraphStyle.alloc().init()
-    para.setAlignment_(2)  # NSTextAlignmentCenter
-    b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
-        title, {
-            NSForegroundColorAttributeName: NSColor.whiteColor(),
-            NSFontAttributeName: NSFont.boldSystemFontOfSize_(13.0),
-            NSParagraphStyleAttributeName: para,
-        }))
-    b.setAlignment_(2)  # cell alignment, applied AFTER the attributed title
     b.setTarget_(target)
     b.setAction_(action)
     b.setTag_(tag)
@@ -1789,7 +1783,7 @@ class MainWindowController(NSObject):
                                                             "assistant.risk_never")))
         cl.setFont_(NSFont.boldSystemFontOfSize_(10.0))
         cl.setTextColor_(NSColor.whiteColor())
-        cl.setAlignment_(2)  # NSTextAlignmentCenter
+        cl.setAlignment_(NSTextAlignmentCenter)  # center==1 here, NOT 2 (==right)
         cl.setLineBreakMode_(NSLineBreakByTruncatingTail)
         cl.setFrame_(NSMakeRect(2, 3, chip_w - 4, 14))
         chip.contentView().addSubview_(cl)
@@ -2039,7 +2033,7 @@ class MainWindowController(NSObject):
                 )
                 caption.setFont_(cap_font)
                 caption.setTextColor_(NSColor.tertiaryLabelColor())
-                caption.setAlignment_(2)  # NSTextAlignmentCenter
+                caption.setAlignment_(NSTextAlignmentCenter)  # center==1, not 2
                 caption.setFrame_(NSMakeRect(0, y, doc_w, CAPTION_H))
                 doc.addSubview_(caption)
                 y += CAPTION_H + 4
