@@ -1205,7 +1205,8 @@ class MainWindowController(NSObject):
         """The flat, ordered list of keyboard-selectable cards: pending
         proposals first, then in-progress threads (kanban is read-only)."""
         return ([("proposal", i) for i in range(len(self._inbox))]
-                + [("thread", i) for i in range(len(self._threads))])
+                + [("thread", i) for i, th in enumerate(self._threads)
+                   if str(th.get("status")) != "done"])  # done = not actionable
 
     def _kbdCurrent(self):
         rows = self._kbdRows()
@@ -1285,9 +1286,11 @@ class MainWindowController(NSObject):
         obj = (self._inbox[idx] if kind == "proposal" else self._threads[idx])
         self._showDetailKind_obj_(kind, obj)
 
-    def _applyKbdHighlight_flat_(self, box, flat):
-        """Accent the card border when it's the keyboard-selected row."""
-        if self._kbd_flat is not None and flat == self._kbd_flat:
+    def _applyKbdHighlight_kind_index_(self, box, kind, index):
+        """Accent the card border when it's the keyboard-selected row. Compares
+        against _kbdCurrent() (kind,index) so it stays correct even when done
+        threads are excluded from the navigable rows."""
+        if self._kbdCurrent() == (kind, index):
             box.setBorderColor_(NSColor.controlAccentColor())
             box.setBorderWidth_(2.0)
             self._kbd_box = box
@@ -1465,9 +1468,9 @@ class MainWindowController(NSObject):
                 print(f"assistant tab: inbox read error {exc!r}", flush=True)
         self._inbox = inbox
         self._threads = threads  # index == button tag for the card actions
-        # keyboard selection: clamp to the (possibly shrunk) list, drop if empty
+        # keyboard selection: clamp to the (possibly shrunk) navigable list
         self._kbd_box = None
-        n_rows = len(inbox) + len(threads)
+        n_rows = len(self._kbdRows())
         if self._kbd_flat is not None:
             self._kbd_flat = None if n_rows == 0 else min(self._kbd_flat, n_rows - 1)
         status = {}
@@ -1517,26 +1520,38 @@ class MainWindowController(NSObject):
         else:
             y = _assistant_empty(doc, y, width, t("assistant.inbox_empty"))
         y += 8
+        # split active vs completed: "진행 중인 일" must show only ongoing work —
+        # a done task is not "in progress" and 이어서 (continue) on it is nonsense.
+        active_idx = [i for i, th in enumerate(threads)
+                      if str(th.get("status")) != "done"]
+        done_idx = [i for i, th in enumerate(threads)
+                    if str(th.get("status")) == "done"]
         y = _assistant_section(doc, y, width, t("assistant.threads_title"),
-                               len(threads))
+                               len(active_idx))
         # the passive-memory promise is always shown here (it's the trust line a
         # new user most needs precisely when they have no threads yet)
         y = _assistant_empty(doc, y, width, t("assistant.passive_hint"))
-        if threads:
-            for i in range(len(threads)):
+        if active_idx:
+            for i in active_idx:
                 y += self._addThreadCardTo_y_width_index_(doc, y, width, i) + gap
         else:
             y = _assistant_empty(doc, y, width, t("assistant.no_threads"))
-        # "더 보기": done threads are capped at self._done_limit so the list
-        # doesn't grow unbounded — surface the cap instead of hiding it silently.
-        if done_total > self._done_limit:
-            remaining = done_total - self._done_limit
-            more = _subtle_button(
-                t("assistant.show_more").format(n=remaining), self,
-                "showMoreDone:", 0, NSMakeRect(4, y, 160, 28))
-            more.setToolTip_(t("assistant.show_more_tip"))
-            doc.addSubview_(more)
-            y += 28 + gap
+        # completed work — its own section, with sensible actions (no 이어서).
+        if done_idx:
+            y += 8
+            y = _assistant_section(doc, y, width, t("assistant.section_done"),
+                                   len(done_idx))
+            for i in done_idx:
+                y += self._addThreadCardTo_y_width_index_(doc, y, width, i) + gap
+            # "더 보기": done threads are capped so the list can't grow unbounded.
+            if done_total > self._done_limit:
+                remaining = done_total - self._done_limit
+                more = _subtle_button(
+                    t("assistant.show_more").format(n=remaining), self,
+                    "showMoreDone:", 0, NSMakeRect(4, y, 160, 28))
+                more.setToolTip_(t("assistant.show_more_tip"))
+                doc.addSubview_(more)
+                y += 28 + gap
         if connected:  # external board section only when an agent is connected
             y += 8
             y = _assistant_section(doc, y, width, t("assistant.section_kanban"),
@@ -1641,7 +1656,7 @@ class MainWindowController(NSObject):
         box._card_kind = "thread"
         box._card_obj = thread
         box.setClickTarget_action_(self, "cardClicked:")
-        self._applyKbdHighlight_flat_(box, len(self._inbox) + index)
+        self._applyKbdHighlight_kind_index_(box, "thread", index)
 
         # colored status dot + title
         status = str(thread.get("status") or "active")
@@ -1735,16 +1750,22 @@ class MainWindowController(NSObject):
             _line("checkmark.circle.fill", green, last,
                   NSColor.secondaryLabelColor(), ly)
 
-        # 이어서 = filled accent · 완료 / 삭제 = subtle
-        inner.addSubview_(_accent_button(
-            t("assistant.resume"), self, "resumeThread:", index,
-            NSMakeRect(pad, 12, 84, btn_h), _ACCENT_BLUE))
-        inner.addSubview_(_subtle_button(
-            t("assistant.done"), self, "completeThread:", index,
-            NSMakeRect(pad + 92, 12, 76, btn_h)))
-        inner.addSubview_(_subtle_button(
-            t("assistant.delete"), self, "deleteThread:", index,
-            NSMakeRect(pad + 176, 12, 76, btn_h)))
+        if status == "done":
+            # completed: 이어서/완료 are meaningless — just let it be cleared.
+            inner.addSubview_(_subtle_button(
+                t("assistant.delete"), self, "deleteThread:", index,
+                NSMakeRect(pad, 12, 76, btn_h)))
+        else:
+            # 이어서 = filled accent · 완료 / 삭제 = subtle
+            inner.addSubview_(_accent_button(
+                t("assistant.resume"), self, "resumeThread:", index,
+                NSMakeRect(pad, 12, 84, btn_h), _ACCENT_BLUE))
+            inner.addSubview_(_subtle_button(
+                t("assistant.done"), self, "completeThread:", index,
+                NSMakeRect(pad + 92, 12, 76, btn_h)))
+            inner.addSubview_(_subtle_button(
+                t("assistant.delete"), self, "deleteThread:", index,
+                NSMakeRect(pad + 176, 12, 76, btn_h)))
 
         doc.addSubview_(box)
         return card_h
@@ -1765,7 +1786,7 @@ class MainWindowController(NSObject):
         box._card_kind = "proposal"
         box._card_obj = prop
         box.setClickTarget_action_(self, "cardClicked:")
-        self._applyKbdHighlight_flat_(box, index)
+        self._applyKbdHighlight_kind_index_(box, "proposal", index)
 
         # risk chip — colored, human-readable (mirrors the floating panel badge)
         klass = str(prop.get("risk") or risk.NEVER_AUTO)
