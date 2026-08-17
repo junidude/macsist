@@ -56,8 +56,10 @@ OFF by default; Google private secret-iCal URL in Keychain via the Settings
 - Thin HTTP client (`httpx` SSE) → separate server (FastAPI proxy → mlx-lm /
   mlx-vlm). **No in-process MLX.** Global hotkeys: `pynput`.
 - v1 modalities: text + vision. No audio. Output: **Korean**.
-- Models are config, never hardcoded (defaults: Qwen3.6-35B-A3B multimodal;
-  27B dense is **text-only** — vision uses the separate `vision_model`).
+- Models are config, never hardcoded. Default: **`Qwen3.8-27B-bf16`** — a
+  native VLM, so one model serves explain + vision + agent and the stack runs
+  **vlm-only** (`:8002` never binds). Needs **mlx-vlm ≥ 0.6.8**. Precision is
+  the RAM dial: bf16 54GB / 8bit 30GB / 4bit 16GB.
 
 ## Hard rules (do not violate — full list & rationale in SPEC §7)
 - Key matching/recording by **virtual keycode only** (Korean layout: 'e'→'ㄷ').

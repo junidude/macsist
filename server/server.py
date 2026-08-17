@@ -35,8 +35,8 @@ EXPECTED_BACKENDS = [
 ]
 HEALTH_PROBE_TIMEOUT = float(os.getenv("HE_HEALTH_PROBE_TIMEOUT", "1.0"))
 
-VLM_MODEL_ID = os.getenv("MACSIST_VLM_MODEL", "mlx-community/Qwen3.6-35B-A3B-4bit")
-LM_MODEL_ID  = os.getenv("MACSIST_LM_MODEL",  "mlx-community/Qwen3.6-27B-4bit")
+VLM_MODEL_ID = os.getenv("MACSIST_VLM_MODEL", "mlx-community/Qwen3.8-27B-bf16")
+LM_MODEL_ID  = os.getenv("MACSIST_LM_MODEL",  "mlx-community/Qwen3.8-27B-bf16")
 
 # Legacy substrings kept so pre-M10 configs that name the 27B keep routing to
 # the dense backend even if MACSIST_LM_MODEL was set to something else.

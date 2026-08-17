@@ -4,8 +4,8 @@ Simple interactive terminal chat against the local LLM server (:8000).
 Same streaming path the Macsist app uses.
 
 Usage:
-    python3 chat.py                 # explain model (35B, multimodal)
-    python3 chat.py --27b           # dense agent backbone
+    python3 chat.py                 # the served model (Qwen3.8-27B, multimodal)
+    python3 chat.py --model <hf-id> # override the model id
     python3 chat.py --image foo.png # send an image (vision), then chat about it
 
 Commands inside the chat:
@@ -15,11 +15,12 @@ Commands inside the chat:
 import sys, json, base64, urllib.request
 
 BASE = "http://127.0.0.1:8000/v1/chat/completions"
-MODEL_35B = "mlx-community/Qwen3.6-35B-A3B-4bit"
-MODEL_27B = "mlx-community/Qwen3.6-27B-4bit"
+# Single multimodal backend since Qwen3.8 (native VLM — text + vision in one
+# model, served vlm-only on :8001). Override with --model for A/B runs.
+DEFAULT_MODEL = "mlx-community/Qwen3.8-27B-bf16"
 
 args = sys.argv[1:]
-model = MODEL_27B if "--27b" in args else MODEL_35B
+model = args[args.index("--model") + 1] if "--model" in args else DEFAULT_MODEL
 image_path = None
 if "--image" in args:
     image_path = args[args.index("--image") + 1]

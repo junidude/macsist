@@ -91,19 +91,20 @@ esac
 ok "언어: $LANG_CODE"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. 모델 카탈로그 + 추천  (Qwen 3.6 / Gemma 4 멀티모달, 성능순)
+# 1. 모델 카탈로그 + 추천  (Qwen 3.8 / Gemma 4 멀티모달, 성능순)
 #    형식: id|크기GB|최소RAM  (단일 멀티모달, vlm-only 모드로 구동)
+#
+#    Qwen3.8-27B은 네이티브 VLM(텍스트+이미지+비디오)이라 텍스트/비전 모델을
+#    따로 띄우지 않습니다 — 정밀도만 RAM에 맞춰 고르면 됩니다. 예전의
+#    "풀 스택"(35B-A3B 비전 + 27B 텍스트 2모델)은 그래서 사라졌습니다.
 # ─────────────────────────────────────────────────────────────────────────────
 CATALOG=(
-    "mlx-community/Qwen3.6-35B-A3B-4bit|22|48"
-    "mlx-community/gemma-4-31b-it-4bit|18|40"
-    "mlx-community/gemma-4-26b-a4b-it-4bit|15|32"
+    "mlx-community/Qwen3.8-27B-bf16|55|96"
+    "mlx-community/Qwen3.8-27B-8bit|30|48"
+    "mlx-community/Qwen3.8-27B-4bit|17|32"
     "mlx-community/gemma-4-12B-it-qat-4bit|7|16"
     "mlx-community/gemma-4-E4B-it-qat-4bit|4|8"
 )
-FULL_VLM="mlx-community/Qwen3.6-35B-A3B-4bit"   # 멀티모달 (vision)
-FULL_LM="mlx-community/Qwen3.6-27B-4bit"        # 텍스트 전용 (explain)
-FULL_SIZE=36                                     # 22+14GB
 
 hf_exists() {  # 모델 repo가 HF에 실제로 존재하는지 (네트워크 없으면 통과)
     curl -fsS -o /dev/null --max-time 10 "https://huggingface.co/api/models/$1" 2>/dev/null
@@ -111,7 +112,8 @@ hf_exists() {  # 모델 repo가 HF에 실제로 존재하는지 (네트워크 �
 
 say "1/7 모델 추천 (RAM ${RAM_GB}GB 기준)"
 HF_ONLINE=1
-curl -fsS -o /dev/null --max-time 10 "https://huggingface.co/api/models/$FULL_VLM" \
+curl -fsS -o /dev/null --max-time 10 \
+    "https://huggingface.co/api/models/${CATALOG[0]%%|*}" \
     || { HF_ONLINE=0; warn "HuggingFace 접속 불가 — 모델 존재 확인을 생략합니다."; }
 
 VERIFIED=()  # 사용 가능 카탈로그 (존재 확인 통과분)
@@ -125,22 +127,17 @@ for entry in "${CATALOG[@]}"; do
 done
 
 RECO_KIND="" RECO_ENTRY=""
-if [[ "$RAM_GB" -ge 96 ]]; then
-    RECO_KIND="full"
-    echo "  추천: ${BOLD}풀 스택${RESET} — 텍스트 $FULL_LM + 비전 $FULL_VLM (~${FULL_SIZE}GB)"
-else
-    for entry in "${VERIFIED[@]}"; do
-        IFS='|' read -r id size min_ram <<< "$entry"
-        if [[ "$RAM_GB" -ge "$min_ram" && "$DISK_GB" -ge $((size + 5)) ]]; then
-            RECO_KIND="single"; RECO_ENTRY="$entry"
-            echo "  추천: ${BOLD}$id${RESET} (~${size}GB, 단일 멀티모달)"
-            break
-        fi
-    done
-    if [[ -z "$RECO_KIND" ]]; then
-        RECO_KIND="api"
-        echo "  추천: RAM ${RAM_GB}GB — 로컬 모델 대신 ${BOLD}외부 API${RESET}를 권장합니다."
+for entry in "${VERIFIED[@]}"; do
+    IFS='|' read -r id size min_ram <<< "$entry"
+    if [[ "$RAM_GB" -ge "$min_ram" && "$DISK_GB" -ge $((size + 5)) ]]; then
+        RECO_KIND="single"; RECO_ENTRY="$entry"
+        echo "  추천: ${BOLD}$id${RESET} (~${size}GB, 단일 멀티모달)"
+        break
     fi
+done
+if [[ -z "$RECO_KIND" ]]; then
+    RECO_KIND="api"
+    echo "  추천: RAM ${RAM_GB}GB — 로컬 모델 대신 ${BOLD}외부 API${RESET}를 권장합니다."
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -159,16 +156,11 @@ case "$PATH_CHOICE" in
             die "이 머신 RAM으로는 로컬 모델을 추천하지 않습니다 — 2(직접 선택) 또는 3(API)을 고르세요."
         fi
         INSTALL_LOCAL=1
-        if [[ "$RECO_KIND" == full ]]; then
-            MODE=full; VLM_MODEL="$FULL_VLM"; LM_MODEL="$FULL_LM"; DL_SIZE=$FULL_SIZE
-        else
-            IFS='|' read -r VLM_MODEL DL_SIZE _ <<< "$RECO_ENTRY"
-            MODE=vlm-only
-        fi
+        IFS='|' read -r VLM_MODEL DL_SIZE _ <<< "$RECO_ENTRY"
+        MODE=vlm-only
         ;;
     2)
         INSTALL_LOCAL=1
-        echo "  0) 풀 스택: $FULL_LM + $FULL_VLM (~${FULL_SIZE}GB, RAM 96GB+ 권장)"
         i=1
         for entry in "${VERIFIED[@]}"; do
             IFS='|' read -r id size min_ram <<< "$entry"
@@ -176,17 +168,12 @@ case "$PATH_CHOICE" in
             i=$((i + 1))
         done
         ask MODEL_CHOICE "모델 번호" ""
-        [[ "$MODEL_CHOICE" =~ ^[0-9]+$ ]] || die "숫자를 입력하세요."
-        if [[ "$MODEL_CHOICE" == 0 ]]; then
-            MODE=full; VLM_MODEL="$FULL_VLM"; LM_MODEL="$FULL_LM"; DL_SIZE=$FULL_SIZE
-            [[ "$RAM_GB" -lt 96 ]] && warn "RAM ${RAM_GB}GB — 풀 스택(두 모델 동시 로드)은 96GB+ 권장입니다."
-        else
-            entry="${VERIFIED[$((MODEL_CHOICE - 1))]:-}"
-            [[ -n "$entry" ]] || die "잘못된 번호입니다."
-            IFS='|' read -r VLM_MODEL DL_SIZE min_ram <<< "$entry"
-            MODE=vlm-only
-            [[ "$RAM_GB" -lt "$min_ram" ]] && warn "RAM ${RAM_GB}GB — 이 모델은 ${min_ram}GB+ 권장입니다."
-        fi
+        [[ "$MODEL_CHOICE" =~ ^[1-9][0-9]*$ ]] || die "1 이상의 숫자를 입력하세요."
+        entry="${VERIFIED[$((MODEL_CHOICE - 1))]:-}"
+        [[ -n "$entry" ]] || die "잘못된 번호입니다."
+        IFS='|' read -r VLM_MODEL DL_SIZE min_ram <<< "$entry"
+        MODE=vlm-only
+        [[ "$RAM_GB" -lt "$min_ram" ]] && warn "RAM ${RAM_GB}GB — 이 모델은 ${min_ram}GB+ 권장입니다."
         ;;
     3) INSTALL_LOCAL=0 ;;
     *) die "1/2/3 중에서 선택하세요." ;;
@@ -252,7 +239,7 @@ if [[ "$INSTALL_LOCAL" == 1 ]]; then
     # 3-5 models.env (서버 모델 설정 — install.sh가 소유)
     NEW_ENV="MACSIST_SERVER_MODE=\"$MODE\"
 MACSIST_VLM_MODEL=\"$VLM_MODEL\"
-MACSIST_LM_MODEL=\"${LM_MODEL:-mlx-community/Qwen3.6-27B-4bit}\""
+MACSIST_LM_MODEL=\"${LM_MODEL:-$VLM_MODEL}\""
     mkdir -p "$SERVER_DIR"
     if [[ -f "$MODELS_ENV" ]] && [[ "$(cat "$MODELS_ENV")" == "$NEW_ENV" ]]; then
         skip "models.env (동일 설정)"

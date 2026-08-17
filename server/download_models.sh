@@ -22,8 +22,8 @@ if [[ ${#MODELS[@]} -eq 0 ]]; then
     # shellcheck disable=SC1090
     [[ -f "$MODELS_ENV" ]] && source "$MODELS_ENV"
     MODE="${MACSIST_SERVER_MODE:-full}"
-    VLM="${MACSIST_VLM_MODEL:-mlx-community/Qwen3.6-35B-A3B-4bit}"
-    LM="${MACSIST_LM_MODEL:-mlx-community/Qwen3.6-27B-4bit}"
+    VLM="${MACSIST_VLM_MODEL:-mlx-community/Qwen3.8-27B-bf16}"
+    LM="${MACSIST_LM_MODEL:-mlx-community/Qwen3.8-27B-bf16}"
     case "$MODE" in
         vlm-only) MODELS=("$VLM") ;;
         lm-only)  MODELS=("$LM") ;;

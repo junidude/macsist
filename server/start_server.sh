@@ -39,8 +39,8 @@ mkdir -p "$LOG_DIR"
 
 # shellcheck disable=SC1091
 [[ -f "$SCRIPT_DIR/models.env" ]] && source "$SCRIPT_DIR/models.env"
-VLM_MODEL="${MACSIST_VLM_MODEL:-mlx-community/Qwen3.6-35B-A3B-4bit}"
-LM_MODEL="${MACSIST_LM_MODEL:-mlx-community/Qwen3.6-27B-4bit}"
+VLM_MODEL="${MACSIST_VLM_MODEL:-mlx-community/Qwen3.8-27B-bf16}"
+LM_MODEL="${MACSIST_LM_MODEL:-mlx-community/Qwen3.8-27B-bf16}"
 
 # server.py lives next to this script; uvicorn imports it as `server:app`.
 cd "$SCRIPT_DIR"

@@ -56,8 +56,8 @@ DEFAULTS = {
             "name": "로컬 서버",
             "base_url": "http://127.0.0.1:8000",
             "api_key_env_or_value": "",
-            "explain_model": "mlx-community/Qwen3.6-35B-A3B-4bit",
-            "vision_model": "mlx-community/Qwen3.6-35B-A3B-4bit",
+            "explain_model": "mlx-community/Qwen3.8-27B-bf16",
+            "vision_model": "mlx-community/Qwen3.8-27B-bf16",
             "is_local": True,
         },
     ],
@@ -68,7 +68,7 @@ DEFAULTS = {
     # to True at load — so onboarding only ever shows a truly fresh download.
     "onboarded": False,
     "alt_model": "mlx-community/Gemma-4-12B-4bit",
-    "agent_model": "mlx-community/Qwen3.6-27B-4bit",
+    "agent_model": "mlx-community/Qwen3.8-27B-bf16",
     # M11: UI + LLM output language (i18n.LANGUAGES). The prompt keys
     # (system_prompt_text/image, user_prompt_image, detail_levels) are NOT in
     # DEFAULTS anymore — get() resolves them from i18n.PROMPT_DEFAULTS for the
@@ -83,9 +83,13 @@ DEFAULTS = {
     "hotkey_open_history": "<cmd>+<shift>+h",
     "max_tokens": 512,
     "temperature": 0.7,
-    # Thinking models (e.g. Qwen3.6-27B) stream chain-of-thought as
-    # delta.reasoning and can burn the whole max_tokens budget before any
-    # content; for a hotkey explainer the latency isn't worth it either.
+    # Thinking models stream chain-of-thought as delta.reasoning and can burn
+    # the whole max_tokens budget before any content; for a hotkey explainer
+    # the latency isn't worth it either. Qwen3.8-27B thinks by DEFAULT at
+    # reasoning_effort='xhigh', so this False is load-bearing — its chat
+    # template only skips the think block on an explicit
+    # `enable_thinking is false`. To dial rather than disable, drop this key
+    # and pass reasoning_effort ('low' | 'medium' | 'xhigh') instead.
     "chat_template_kwargs": {"enable_thinking": False},
     "request_connect_timeout": 5.0,
     "request_read_timeout": 120.0,

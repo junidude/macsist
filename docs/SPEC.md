@@ -185,12 +185,25 @@ restart-free provider-switch verification).
 - **Hotkeys:** `pynput`, but **matching MUST be by virtual keycode** — see §7.1.
 
 ### Models (config, with defaults)
-- Explain default: `mlx-community/Qwen3.6-35B-A3B-4bit` (multimodal MoE).
-- Vision default: same 35B (`vision_model` is separate config — the explain
-  model may be a text-only pick like the 27B).
-- Alt explain (A/B): `Gemma-4-12B` (not yet in the server pool).
-- Agent backbone (future): `Qwen3.6-27B` dense — **text-only**, rejects
-  `image_url` content.
+- Explain / vision / agent default: `mlx-community/Qwen3.8-27B-bf16` — one
+  model for all three. Qwen3.8-27B is a **native VLM** (dense 27B, hybrid
+  Gated DeltaNet 3:1 Gated Full Attention over 64 layers, native 256K ctx),
+  so text and `image_url` content go to the same backend and the stack runs
+  **vlm-only** (`:8001` only; `:8002` never binds).
+- `vision_model` stays a separate config key: an external provider (or a
+  text-only local pick) may still need a different id for region capture.
+- Alt explain (A/B): `Gemma-4-12B` (not in the server pool — inert default).
+- Precision is the only local tier knob (weights only, + KV cache):
+  `-bf16` 54.4GB / `-8bit` 29.5GB / `-4bit` 16.1GB. bf16 decode is memory
+  bandwidth bound — roughly ½ the tok/s of 8bit, ⅓ of 4bit.
+- Requires **mlx-vlm ≥ 0.6.8** (the mlx-community conversions were made with
+  0.6.8; the Gated DeltaNet blocks don't load on older builds).
+
+**History:** through Qwen3.6 this was a 2-model stack — `Qwen3.6-35B-A3B-4bit`
+(multimodal, `:8001`) + `Qwen3.6-27B-4bit` (dense **text-only**, rejected
+`image_url`, `:8002`). Qwen3.8 collapses both into one, which is why
+`install.sh` no longer offers a "풀 스택" tier. `full` mode itself is still
+supported by `start_server.sh` / `server.py` for a hand-written `models.env`.
 
 ---
 
@@ -358,11 +371,12 @@ interactive TUI (plain bash + read prompts; Korean) that walks through:
    for the user's bindings.
 Idempotent — safe to re-run; each step detects "already done".
 
-*(As built, M10)* Hardware tiering: `sysctl hw.memsize` → 128GB+ recommends the
-full 2-model stack; below that, the best single **multimodal** model whose
-min-RAM fits (Qwen3.6-35B-A3B 48GB+ → gemma-4-31b-it 40+ → gemma-4-26b-a4b-it
-32+ → gemma-4-12B-it-qat 16+ → gemma-4-E4B-it-qat 8+); <16GB recommends the
-API path. Every catalog id is verified against the HF API before being offered
+*(As built, M10; retiered for Qwen3.8)* Hardware tiering: `sysctl hw.memsize`
+→ the best single **multimodal** model whose min-RAM fits (Qwen3.8-27B-bf16
+96GB+ → -8bit 48+ → -4bit 32+ → gemma-4-12B-it-qat 16+ → gemma-4-E4B-it-qat
+8+); <8GB recommends the API path. Every tier is now the same model at a
+different precision, so the recommendation is a quality/speed dial rather
+than a model swap, and the old 2-model "풀 스택" tier is gone. Every catalog id is verified against the HF API before being offered
 (404 → tier dropped with a warning), so guessed ids self-heal at runtime.
 Server models live in `models.env` next to the deployed `start_server.sh`
 (`MACSIST_SERVER_MODE=full|vlm-only|lm-only`, `MACSIST_VLM_MODEL`,
