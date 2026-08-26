@@ -81,7 +81,7 @@ DEFAULTS = {
     "hotkey_explain_region": "<cmd>+<shift>+r",
     # History 윈도우 토글 (Cmd-Tab 미등장 보완 — Accessory 앱)
     "hotkey_open_history": "<cmd>+<shift>+h",
-    "max_tokens": 512,
+    "max_tokens": 1024,
     "temperature": 0.7,
     # Thinking models stream chain-of-thought as delta.reasoning and can burn
     # the whole max_tokens budget before any content; for a hotkey explainer

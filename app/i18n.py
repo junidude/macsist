@@ -2044,12 +2044,14 @@ _KO_CONTEXT_SECTION = (
     "어디서 나온 말: 이게 어떤 분야의, 어떤 종류의 글에서 나온 것인지 짚어줘라\n"
     "(논문 초록, API 문서의 에러 설명, 계약서 면책 조항, 커뮤니티 은어 등).\n"
     "그렇게 본 단서도 같이 밝혀라 — 어떤 표현이나 용어를 보고 그렇게 판단했는지.\n"
-    "확실하지 않으면 단정하지 말고 '아마 ~로 보인다'라고 써라.\n"
-    "\n"
+    "확실하지 않으면 단정하지 말고 '아마 ~로 보인다'라고 써라."
+)
+
+_KO_ACRONYM_SECTION = (
     "약자 풀이: 약자·이니셜·줄임말이 있으면 하나도 빠뜨리지 말고 모아서\n"
     "'약자 = 원래 표기 (우리말 뜻)' 형식으로 풀어라. 이 맥락에서 무엇을 줄인\n"
     "것인지가 핵심이다. 같은 약자가 분야마다 뜻이 다르면 여기서는 어느 쪽으로\n"
-    "쓰였는지 밝혀라. 영문 약자뿐 아니라 한글 줄임말과 업계 은어도 포함한다."
+    "쓰였는지 밝혀라. 영문 약자뿐 아니라 한글 줄임말과 업계 은어도 포함한다.\n"
     "본문에 실제로 나온 것만 풀고, 같은 약자는 한 번만 올려라. "
     "없는 약자를 지어내지 마라."
 )
@@ -2058,7 +2060,7 @@ _KO_FORMAT_RULES = (
     "항목 이름은 위에 적힌 그대로 쓰고, 각 항목은 새 줄에서 시작해라. 해당 없는\n"
     "항목은 제목까지 통째로 생략한다. 군더더기 금지.\n"
     "이 형식은 첫 답변에만 적용한다. 이어지는 질문에는 형식을 버리고 성실하게\n"
-    "답하는 비서처럼 답하면 된다. 번역은 처음 한 번으로 충분하다."
+    "답하는 비서처럼 답하면 된다. 번역은 처음 한 번으로 충분하다.\n"
     "위에 없는 항목을 새로 만들지 마라 — 비유는 '쉽게 말하면:'"
     " 안에 넣고 따로 제목을 달지 마라."
 )
@@ -2069,6 +2071,8 @@ _KO_EXPLAIN_TEXT = (
     "\n"
     "번역: 텍스트가 한국어가 아니면(영어/중국어/일본어 등) 자연스러운 한국어\n"
     "번역을 먼저 제시해라. 긴 글이면 핵심 위주로. 원문이 한국어면 생략한다.\n"
+    "\n"
+    + _KO_ACRONYM_SECTION + "\n"
     "\n"
     "쉽게 말하면: 핵심을 아주 쉬운 말로 풀어라. 전문용어를 그대로 쓰지 말고,\n"
     "읽는 사람이 이미 아는 일상적인 것에 빗댄 비유를 반드시 하나 이상 들어라\n"
@@ -2088,6 +2092,8 @@ _KO_EXPLAIN_IMAGE = (
     "\n"
     "번역: 이미지 속 텍스트가 한국어가 아니면 한국어 번역을 먼저 제시해라.\n"
     "글자가 없거나 이미 한국어면 생략한다.\n"
+    "\n"
+    + _KO_ACRONYM_SECTION + "\n"
     "\n"
     "쉽게 말하면: 이미지가 무엇을 담고 있는지 아주 쉬운 말로 풀어라. 표·코드·\n"
     "도식·그래프면 그것이 무엇을 나타내는지, 어디를 봐야 하는지 짚어줘라.\n"
@@ -2119,8 +2125,10 @@ _EN_CONTEXT_SECTION = (
     "paper abstract, an error note in API docs, an indemnity clause in a contract,\n"
     "community slang, and so on. Name what tipped you off: which phrases or terms\n"
     "led you there. If you are not sure, do not assert it — write 'this looks\n"
-    "like...'.\n"
-    "\n"
+    "like...'."
+)
+
+_EN_ACRONYM_SECTION = (
     "Acronyms: If there are acronyms, initialisms, or shortened forms, collect\n"
     "every one of them and expand each as 'ABC = full form (what it means in plain\n"
     "words)'. What matters is what it stands for in THIS context. If the same\n"
@@ -2149,6 +2157,8 @@ _EN_EXPLAIN_TEXT = (
     "translation first (the gist for long passages). If it is already English,\n"
     "skip this section.\n"
     "\n"
+    + _EN_ACRONYM_SECTION + "\n"
+    "\n"
     "In plain terms: Unpack the core in very simple words. Do not reuse jargon\n"
     "as-is. You must give at least one analogy to something the reader already\n"
     "knows from everyday life (parcel delivery, a librarian, a restaurant kitchen,\n"
@@ -2169,6 +2179,8 @@ _EN_EXPLAIN_IMAGE = (
     "Translation: If the text in the image is not in English, give an English\n"
     "translation first. If there is no text, or it is already English, skip this\n"
     "section.\n"
+    "\n"
+    + _EN_ACRONYM_SECTION + "\n"
     "\n"
     "In plain terms: Unpack what the image holds in very simple words. For tables,\n"
     "code, diagrams, or charts, say what they represent and where to look. Do not\n"
@@ -2193,8 +2205,10 @@ _ZH_TRANSLATION_RULES = (
 _ZH_CONTEXT_SECTION = (
     "出处推测：指出这段内容出自哪个领域、哪一类文字——论文摘要、API 文档里的报错\n"
     "说明、合同里的免责条款、社区黑话等等。同时说明你的判断依据：是看到哪些\n"
-    "表达或术语才这么判断的。没有把握就不要下断言，写「看起来像是……」。\n"
-    "\n"
+    "表达或术语才这么判断的。没有把握就不要下断言，写「看起来像是……」。"
+)
+
+_ZH_ACRONYM_SECTION = (
     "缩写解释：只要出现缩写、首字母缩略语或简称，一个都不要漏掉，全部按\n"
     "「缩写 = 完整写法（用大白话说是什么）」的格式展开。关键是它在这个语境下到底\n"
     "是哪几个词的缩写。同一个缩写在不同领域含义不同时，要说明这里用的是哪一个。\n"
@@ -2218,6 +2232,8 @@ _ZH_EXPLAIN_TEXT = (
     "翻译：如果文本不是中文，先给出自然的中文翻译（长文只译要点）。原文本来就是\n"
     "中文的话，这一节整个省略。\n"
     "\n"
+    + _ZH_ACRONYM_SECTION + "\n"
+    "\n"
     "说人话：用非常浅显的话把核心讲清楚。不要直接搬用专业术语，必须至少打一个比\n"
     "方，拿读者本来就熟悉的日常事物来类比（快递配送、图书馆管理员、餐厅后厨、小\n"
     "区物业之类）。比方不是装饰，它要能说明结构或者运作原理。\n"
@@ -2235,6 +2251,8 @@ _ZH_EXPLAIN_IMAGE = (
     "\n"
     "翻译：如果图中的文字不是中文，先给出中文翻译。图里没有文字或本来就是中文\n"
     "的话，这一节整个省略。\n"
+    "\n"
+    + _ZH_ACRONYM_SECTION + "\n"
     "\n"
     "说人话：用非常浅显的话讲清楚图里有什么。如果是表格、代码、示意图或图表，要\n"
     "说明它表示什么、该看哪里。不要直接搬用专业术语，必须至少打一个比方，拿读者\n"
@@ -2260,8 +2278,10 @@ _JA_CONTEXT_SECTION = (
     "してください（論文の要旨、APIドキュメントのエラー説明、契約書の免責条項、\n"
     "コミュニティの俗語など）。そう判断した手がかりも一緒に挙げてください——どの\n"
     "表現や用語を見てそう見たのか。確信が持てないときは断定せず「おそらく〜と思\n"
-    "われます」と書いてください。\n"
-    "\n"
+    "われます」と書いてください。"
+)
+
+_JA_ACRONYM_SECTION = (
     "略語の展開: 略語・頭字語・省略形があれば一つも漏らさず集めて、「略語 = 元の\n"
     "表記（かみくだくと何か）」の形で展開してください。この文脈で何を縮めたもの\n"
     "なのかが肝心です。同じ略語が分野によって意味が違う場合は、ここではどちらの\n"
@@ -2287,6 +2307,8 @@ _JA_EXPLAIN_TEXT = (
     "翻訳: テキストが日本語でない場合は、まず自然な日本語訳を示してください（長文\n"
     "は要点中心で）。もとから日本語なら、この項目は省いてください。\n"
     "\n"
+    + _JA_ACRONYM_SECTION + "\n"
+    "\n"
     "かみくだくと: 核心をとてもやさしい言葉で解きほぐしてください。専門用語をそ\n"
     "のまま使わず、読み手がすでに知っている日常のものにたとえた比喩を必ず一つ以\n"
     "上入れてください（宅配便、図書館の司書、飲食店の厨房、マンションの管理人な\n"
@@ -2305,6 +2327,8 @@ _JA_EXPLAIN_IMAGE = (
     "\n"
     "翻訳: 画像内のテキストが日本語でない場合は、まず日本語訳を示してください。文\n"
     "字がない、またはもとから日本語なら、この項目は省いてください。\n"
+    "\n"
+    + _JA_ACRONYM_SECTION + "\n"
     "\n"
     "かみくだくと: 画像に何が写っているかをとてもやさしい言葉で解きほぐしてくだ\n"
     "さい。表・コード・図解・グラフなら、それが何を表していてどこを見ればよいか\n"
@@ -2333,8 +2357,10 @@ _FR_CONTEXT_SECTION = (
     "résumé d'article scientifique, note d'erreur dans une documentation d'API,\n"
     "clause de non-responsabilité d'un contrat, argot de forum, etc. Précise ce\n"
     "qui t'a mis sur la piste : quelles expressions ou quels termes. Si tu n'es\n"
-    "pas sûr, n'affirme rien — écris « cela ressemble à... ».\n"
-    "\n"
+    "pas sûr, n'affirme rien — écris « cela ressemble à... »."
+)
+
+_FR_ACRONYM_SECTION = (
     "Sigles : S'il y a des sigles, des acronymes ou des abréviations, rassemble-les\n"
     "tous sans exception et développe chacun sous la forme « SIG = forme complète\n"
     "(ce que cela veut dire en clair) ». L'essentiel est ce que le sigle abrège\n"
@@ -2363,6 +2389,8 @@ _FR_EXPLAIN_TEXT = (
     "française naturelle (l'essentiel pour les longs passages). S'il est déjà en\n"
     "français, saute cette section.\n"
     "\n"
+    + _FR_ACRONYM_SECTION + "\n"
+    "\n"
     "En clair : Explique le cœur du sujet avec des mots très simples. Ne réutilise\n"
     "pas le jargon tel quel ; tu dois donner au moins une analogie avec quelque\n"
     "chose que le lecteur connaît déjà du quotidien (la livraison de colis, un\n"
@@ -2384,6 +2412,8 @@ _FR_EXPLAIN_IMAGE = (
     "Traduction : Si le texte de l'image n'est pas en français, donne d'abord une\n"
     "traduction française. S'il n'y a pas de texte, ou s'il est déjà en français,\n"
     "saute cette section.\n"
+    "\n"
+    + _FR_ACRONYM_SECTION + "\n"
     "\n"
     "En clair : Explique ce que contient l'image avec des mots très simples. Pour\n"
     "un tableau, du code, un schéma ou un graphique, dis ce qu'il représente et où\n"
@@ -2412,8 +2442,10 @@ _DE_CONTEXT_SECTION = (
     "kommt — Abstract einer Arbeit, Fehlerbeschreibung in einer API-Dokumentation,\n"
     "Haftungsausschluss in einem Vertrag, Community-Jargon und so weiter. Nenne\n"
     "auch, woran du es erkannt hast: an welchen Formulierungen oder Begriffen.\n"
-    "Wenn du unsicher bist, behaupte nichts — schreibe „das sieht aus wie ...“.\n"
-    "\n"
+    "Wenn du unsicher bist, behaupte nichts — schreibe „das sieht aus wie ...“."
+)
+
+_DE_ACRONYM_SECTION = (
     "Abkürzungen: Wenn Abkürzungen, Akronyme oder Kurzformen vorkommen, sammle\n"
     "ausnahmslos alle und löse jede als „ABC = ausgeschriebene Form (was es\n"
     "einfach gesagt bedeutet)“ auf. Entscheidend ist, wofür sie IN DIESEM\n"
@@ -2446,6 +2478,8 @@ _DE_EXPLAIN_TEXT = (
     "Texten das Wesentliche). Nur wenn der Text bereits deutsch ist, lasse\n"
     "diesen Abschnitt weg.\n"
     "\n"
+    + _DE_ACRONYM_SECTION + "\n"
+    "\n"
     "Einfach gesagt: Erkläre den Kern mit sehr einfachen Worten. Übernimm\n"
     "Fachbegriffe nicht unverändert; du musst mindestens eine Analogie zu etwas\n"
     "bringen, das die Lesenden aus dem Alltag schon kennen (Paketzustellung, eine\n"
@@ -2468,6 +2502,8 @@ _DE_EXPLAIN_IMAGE = (
     "Übersetzung. Gibt es keinen Text oder ist er bereits deutsch, lasse diesen\n"
     "Abschnitt weg.\n"
     "\n"
+    + _DE_ACRONYM_SECTION + "\n"
+    "\n"
     "Einfach gesagt: Erkläre mit sehr einfachen Worten, was das Bild zeigt. Bei\n"
     "Tabellen, Code, Diagrammen oder Graphen sage, was sie darstellen und wohin\n"
     "man schauen muss. Übernimm Fachbegriffe nicht unverändert; du musst\n"
@@ -2485,7 +2521,7 @@ _DE_EXPLAIN_IMAGE = (
 
 # Language-resolved config defaults. The others are written natively, not
 # literal translations. detail key order (brief/normal/detailed) and max_tokens
-# (512/1024/1600) must be identical in every language — the settings segmented
+# (1024/2048/3200) must be identical in every language — the settings segmented
 # control derives segment order from the dict, and the saved `explain_detail`
 # key is language-neutral. The `detailed` suffix intentionally overrides the
 # base prompt's sentence range in every language ("This time, however, …").
@@ -2545,12 +2581,12 @@ PROMPT_DEFAULTS = {
             "brief": {
                 "label": "간단",
                 "prompt_suffix": " 각 항목은 한 문장씩만 짧게 써라.",
-                "max_tokens": 512,
+                "max_tokens": 1024,
             },
             "normal": {
                 "label": "보통",
                 "prompt_suffix": "",
-                "max_tokens": 1024,
+                "max_tokens": 2048,
             },
             "detailed": {
                 "label": "자세히",
@@ -2558,7 +2594,7 @@ PROMPT_DEFAULTS = {
                     " 단, 이번에는 항목마다 배경 지식과 예시를 더 넣어 넉넉하게 "
                     "설명하고, 비유도 둘 이상 들어라."
                 ),
-                "max_tokens": 1600,
+                "max_tokens": 3200,
             },
         },
     },
@@ -2613,13 +2649,13 @@ PROMPT_DEFAULTS = {
             "brief": {
                 "label": "Brief",
                 "prompt_suffix": " Keep each section to a single sentence.",
-                "max_tokens": 512,
+                "max_tokens": 1024,
             },
-            "normal": {"label": "Normal", "prompt_suffix": "", "max_tokens": 1024},
+            "normal": {"label": "Normal", "prompt_suffix": "", "max_tokens": 2048},
             "detailed": {
                 "label": "Detailed",
                 "prompt_suffix": " This time, however, give each section more background and examples, and use at least two analogies.",
-                "max_tokens": 1600,
+                "max_tokens": 3200,
             },
         },
     },
@@ -2668,13 +2704,13 @@ PROMPT_DEFAULTS = {
             "brief": {
                 "label": "简短",
                 "prompt_suffix": " 每个小节只写一句话。",
-                "max_tokens": 512,
+                "max_tokens": 1024,
             },
-            "normal": {"label": "普通", "prompt_suffix": "", "max_tokens": 1024},
+            "normal": {"label": "普通", "prompt_suffix": "", "max_tokens": 2048},
             "detailed": {
                 "label": "详细",
                 "prompt_suffix": " 不过这次请在每个小节里加入更多背景和例子，并且至少打两个比方。",
-                "max_tokens": 1600,
+                "max_tokens": 3200,
             },
         },
     },
@@ -2728,13 +2764,13 @@ PROMPT_DEFAULTS = {
             "brief": {
                 "label": "簡単",
                 "prompt_suffix": " 各項目は1文ずつだけにしてください。",
-                "max_tokens": 512,
+                "max_tokens": 1024,
             },
-            "normal": {"label": "普通", "prompt_suffix": "", "max_tokens": 1024},
+            "normal": {"label": "普通", "prompt_suffix": "", "max_tokens": 2048},
             "detailed": {
                 "label": "詳しく",
                 "prompt_suffix": " ただし今回は各項目に背景知識と例をさらに加えて厚く説明し、たとえも2つ以上使ってください。",
-                "max_tokens": 1600,
+                "max_tokens": 3200,
             },
         },
     },
@@ -2790,13 +2826,13 @@ PROMPT_DEFAULTS = {
             "brief": {
                 "label": "Bref",
                 "prompt_suffix": " Limite chaque section à une seule phrase.",
-                "max_tokens": 512,
+                "max_tokens": 1024,
             },
-            "normal": {"label": "Normal", "prompt_suffix": "", "max_tokens": 1024},
+            "normal": {"label": "Normal", "prompt_suffix": "", "max_tokens": 2048},
             "detailed": {
                 "label": "Détaillé",
                 "prompt_suffix": " Cette fois cependant, étoffe chaque section avec du contexte et des exemples, et utilise au moins deux analogies.",
-                "max_tokens": 1600,
+                "max_tokens": 3200,
             },
         },
     },
@@ -2853,13 +2889,13 @@ PROMPT_DEFAULTS = {
             "brief": {
                 "label": "Kurz",
                 "prompt_suffix": " Beschränke jeden Abschnitt auf einen Satz.",
-                "max_tokens": 512,
+                "max_tokens": 1024,
             },
-            "normal": {"label": "Normal", "prompt_suffix": "", "max_tokens": 1024},
+            "normal": {"label": "Normal", "prompt_suffix": "", "max_tokens": 2048},
             "detailed": {
                 "label": "Ausführlich",
                 "prompt_suffix": " Diesmal jedoch ergänze jeden Abschnitt um Hintergrund und Beispiele und verwende mindestens zwei Analogien.",
-                "max_tokens": 1600,
+                "max_tokens": 3200,
             },
         },
     },
