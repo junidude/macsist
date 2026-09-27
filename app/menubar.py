@@ -128,6 +128,12 @@ class StatusItemController(NSObject):
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 float(open_assistant), self, "openAssistant:", None, False
             )
+        open_memory = os.environ.get("HE_DEBUG_OPEN_MEMORY")
+        if open_memory:  # M20: verify the 기억 tab build path live
+            from Foundation import NSTimer
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                float(open_memory), self, "openMemory:", None, False
+            )
         return self
 
     def debugOpenMenu_(self, timer):
@@ -196,3 +202,6 @@ class StatusItemController(NSObject):
 
     def openAssistant_(self, sender):
         self.main_window.showAssistant()
+
+    def openMemory_(self, sender):
+        self.main_window.showMemory()

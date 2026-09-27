@@ -22,6 +22,7 @@ from Quartz import (
 
 from hotkeys import HotkeyManager
 from llm_client import LLMClient, LLMError, StreamHandle
+from memory.recall import recall_block
 from region_capture import capture_region, to_data_url
 from text_capture import capture_selected_text
 
@@ -81,12 +82,14 @@ def _last_user_text(messages):
 
 class ExplainController:
     def __init__(self, config, panel, health_monitor=None, history=None,
-                 assistant=None):
+                 assistant=None, memory=None, memory_monitor=None):
         self.config = config
         self.panel = panel
         self.health_monitor = health_monitor
         self.history = history  # HistoryStore (M7); appends on the main thread
         self.assistant = assistant  # AssistantController (M14); hotkeys route here
+        self.memory = memory  # MemoryStore (M20); recalled pre-stream, fed post
+        self.memory_monitor = memory_monitor  # MemoryMonitor — poked after commit
         self.client = LLMClient(config)
         self._lock = threading.Lock()
         self._gen = 0
@@ -368,7 +371,8 @@ class ExplainController:
         suffix, max_tokens, detail = self._detail()
         messages = [
             {"role": "system",
-             "content": self.config.get("system_prompt_text") + suffix},
+             "content": (self.config.get("system_prompt_text") + suffix
+                         + self._memoryBlock(text))},
             {"role": "user", "content": text},
         ]
         self._stream(gen, handle, messages, max_tokens=max_tokens,
@@ -418,8 +422,12 @@ class ExplainController:
                      centered)
         suffix, max_tokens, detail = self._detail()
         messages = [
+            # region captures have no text to recall against before the stream
+            # (the pixels are all we have), so this contributes the reader
+            # profile only; the ANSWER still feeds memory afterwards.
             {"role": "system",
-             "content": self.config.get("system_prompt_image") + suffix},
+             "content": (self.config.get("system_prompt_image") + suffix
+                         + self._memoryBlock(""))},
             {"role": "user", "content": [
                 {"type": "text", "text": user_text},
                 {"type": "image_url", "image_url": {"url": to_data_url(png)}},
@@ -455,6 +463,33 @@ class ExplainController:
     def _setCaptureProc(self, proc):
         with self._lock:
             self._capture_proc = proc
+
+    def _memoryBlock(self, text):
+        """System-prompt suffix naming what the user has already read about this
+        (M20). Worker thread, and deliberately LLM-free — recall is term overlap
+        over an in-memory index, so the panel opens exactly as fast as before.
+        Never fatal: a broken memory must degrade to "no memory", never take the
+        explanation down with it."""
+        if self.memory is None:
+            return ""
+        try:
+            return recall_block(self.memory, self.config, text)
+        except Exception as exc:
+            print(f"memory: recall skipped ({exc!r})", flush=True)
+            return ""
+
+    def _remember(self, mode, input_text, content):
+        """Queue this finished reading for distillation (M20). Main thread: a
+        single appended line, the LLM work happens on the monitor's thread."""
+        if self.memory is None or not bool(self.config.get("memory_enabled")):
+            return
+        try:
+            self.memory.enqueue(mode, input_text, content)
+        except Exception as exc:
+            print(f"memory: enqueue failed ({exc!r})", flush=True)
+            return
+        if self.memory_monitor is not None:
+            self.memory_monitor.poke()
 
     def _detail(self):
         """(prompt suffix, max_tokens, level key) for the configured detail."""
@@ -549,17 +584,23 @@ class ExplainController:
         # (pure errors) are not history; the input snippet takes only the
         # text parts of the user message — the region base64 never leaves
         # the messages list.
-        if self.history is not None and content.strip():
-            self.history.append(
-                mode,
-                model or str(self.config.active_provider()["explain_model"]),
-                _last_user_text(messages),
-                content,
-                detail,
-                image_png=(
-                    _last_user_image(messages) if mode == "region" else None
-                ),
-            )
+        if content.strip():
+            user_text = _last_user_text(messages)
+            if self.history is not None:
+                self.history.append(
+                    mode,
+                    model or str(self.config.active_provider()["explain_model"]),
+                    user_text,
+                    content,
+                    detail,
+                    image_png=(
+                        _last_user_image(messages) if mode == "region" else None
+                    ),
+                )
+            # M20: history is now a short rolling buffer — the durable record of
+            # what the user read is the memory queue, so it is fed here and not
+            # derived from the JSONL later.
+            self._remember(mode, user_text, content)
         self.panel.showFollowUpInput()
 
     def submitFollowUp(self, text):

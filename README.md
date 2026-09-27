@@ -30,6 +30,7 @@ Select some text — a foreign sentence, a dense paragraph, an error message, a 
 - **🌍 6 languages** — 한국어 · English · 简体中文 · 日本語 · Français · Deutsch, for **both** the UI and the answers. Switch live in Settings; no restart. Input in another language gets a natural `Translation:` line first.
 - **🪟 Liquid-Glass panel** — a translucent, rounded, auto-sizing panel that fades in by the cursor. **Drag it anywhere** by its background to move it out of the way.
 - **🗂 History** — every explain is saved locally and searchable (`⌘⇧H`). Copy it, re-ask it with the current model (region rows re-send the saved screenshot), or delete a session — all from a chat-style window.
+- **🧠 Memory** — what you read accumulates into **files about your interests**. After each explain, the local model distills the concepts behind it into markdown notes under `memory/notes/*.md` (yours to read and edit), and the next time something related comes up the explanation **ties back to what you already saw**. Retrieval is instant and on-device — no extra LLM call in the hotkey path, so the panel is exactly as fast as before. Distillation is **local-model-only** by default.
 - **🔌 Your model, your choice** — run a **local** MLX server, or point Macsist at any **OpenAI-compatible API** (OpenRouter, etc.). API keys live in the macOS **Keychain**, never on disk.
 - **🔒 Private by default** — local-first, no telemetry, no Electron. A real signed `.app` bundle: Dock, Cmd-Tab and the permission lists all show **Macsist** with its icon.
 
@@ -152,6 +153,7 @@ Installed by `install.sh` as a symlink on your `PATH` — works from any directo
 | `macsist status` | agents, server health, provider/models, TCC state |
 | `macsist logs [app\|server] [-f]` | tail the right log files |
 | `macsist settings` / `macsist history` | open the main window |
+| `macsist memory [status\|list\|show\|backfill\|distill\|profile\|open\|retire-cache]` | memory: inspect notes, build it from existing history (backfill), rewrite the reader profile, retire the old cache |
 | `macsist doctor` | full ✓/✗ diagnosis: deploy, config, Keychain key, health, TCC, model cache |
 | `macsist update` | `git pull --ff-only` + redeploy both agents |
 

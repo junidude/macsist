@@ -5,6 +5,7 @@ Accessory activation policy = LSUIElement equivalent: no Dock icon, menu bar onl
 
 import os
 import sys
+import threading
 
 import objc
 
@@ -37,6 +38,8 @@ from config import ConfigStore, asset_dir
 from explain_controller import ExplainController
 from health import ServerHealthMonitor
 from history_store import HistoryStore
+from memory.monitor import MemoryMonitor
+from memory.store import MemoryStore
 from menubar import StatusItemController
 from result_panel import ResultPanelController
 
@@ -45,6 +48,8 @@ _controller = None
 _explain = None
 _health = None
 _assistant = None
+_memory = None
+_memory_monitor = None
 _ax_waiter = None
 _ui_auditor = None
 _remote_relay = None
@@ -56,12 +61,14 @@ class _RemoteCommandRelay(NSObject):
     main-thread — safe to drive AppKit directly. The `remote:` lines are the
     greppable verification hook (app.log)."""
 
-    def initWithMainWindow_assistant_(self, main_window, assistant):
+    def initWithMainWindow_assistant_memory_(self, main_window, assistant,
+                                             memory_monitor):
         self = objc.super(_RemoteCommandRelay, self).init()
         if self is None:
             return None
         self._main_window = main_window
         self._assistant = assistant
+        self._memory_monitor = memory_monitor
         return self
 
     def remoteShowSettings_(self, note):
@@ -115,6 +122,39 @@ class _RemoteCommandRelay(NSObject):
         print("remote: assistant.calendarSync", flush=True)
         if self._assistant is not None:
             self._assistant.syncCalendar()
+
+    # -- M20 memory (`macsist memory …`) --------------------------------------
+    # The app is the single writer to memory/: distillation needs httpx + the
+    # provider config the app already holds, and two processes folding the same
+    # notes would race. The CLI reads the files directly and asks the app for
+    # anything that writes.
+
+    def remoteShowMemory_(self, note):
+        print("remote: showMemory", flush=True)
+        self._main_window.showMemory()
+
+    def remoteMemoryBackfill_(self, note):
+        print("remote: memory.backfill", flush=True)
+        if self._memory_monitor is None:
+            return
+        records = HistoryStore(self._memory_monitor.config).load()
+        started = self._memory_monitor.backfill_async(list(reversed(records)))
+        print(f"remote: memory.backfill records={len(records)} "
+              f"started={started}", flush=True)
+
+    def remoteMemoryDistill_(self, note):
+        print("remote: memory.distill", flush=True)
+        if self._memory_monitor is not None:
+            self._memory_monitor.poke()
+
+    def remoteMemoryProfile_(self, note):
+        print("remote: memory.profile", flush=True)
+        if self._memory_monitor is None:
+            return
+        threading.Thread(
+            target=self._memory_monitor.distiller.profile,
+            name="memory-profile", daemon=True,
+        ).start()
 
 
 class _UIAuditor(NSObject):
@@ -244,6 +284,7 @@ class _AXGrantWaiter(NSObject):
 
 def main():
     global _controller, _explain, _health, _assistant
+    global _memory, _memory_monitor
     global _ax_waiter, _ui_auditor, _remote_relay
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
@@ -296,6 +337,9 @@ def main():
     # M11: resolve the UI/output language BEFORE any controller builds labels
     i18n.set_language(str(config.get("language")))
     history = HistoryStore(config)
+    # M20: the filesystem memory of what the user reads. Built before the
+    # explain controller — recall runs inside the hotkey path.
+    _memory = MemoryStore(config)
     _controller = StatusItemController.alloc().initWithConfig_history_(
         config, history
     )
@@ -305,11 +349,19 @@ def main():
     # M13/M14: assistant subsystem. Built before ExplainController so its
     # hotkeys (capture-task / open-inbox) join the single HotkeyManager.
     _assistant = AssistantController(config, _controller, main_window)
+    _memory_monitor = MemoryMonitor(config, _memory)
+    _memory.on_changed = lambda: AppHelper.callAfter(main_window.memoryChanged)
+    _memory_monitor.on_changed = _memory.on_changed
     _explain = ExplainController(config, panel, health_monitor=_health,
-                                 history=history, assistant=_assistant)
+                                 history=history, assistant=_assistant,
+                                 memory=_memory,
+                                 memory_monitor=_memory_monitor)
+    main_window.memory = _memory
+    main_window.memory_monitor = _memory_monitor
     _health.start()
     _explain.start()
     _assistant.start()
+    _memory_monitor.start()
 
     def _settings_saved():
         _explain.reloadHotkeys()
@@ -335,8 +387,10 @@ def main():
     # controller's streaming glass panel (reuses follow-up + cancellation).
     main_window.on_assistant_answer = _explain.answer_question
     # M10: `macsist settings|history` IPC (distributed notifications).
-    _remote_relay = _RemoteCommandRelay.alloc().initWithMainWindow_assistant_(
-        main_window, _assistant)
+    _remote_relay = (
+        _RemoteCommandRelay.alloc().initWithMainWindow_assistant_memory_(
+            main_window, _assistant, _memory_monitor)
+    )
     dist_center = NSDistributedNotificationCenter.defaultCenter()
     dist_center.addObserver_selector_name_object_(
         _remote_relay, "remoteShowSettings:", "com.macsist.showSettings", None
@@ -359,6 +413,17 @@ def main():
     ):
         dist_center.addObserver_selector_name_object_(
             _remote_relay, _sel, f"com.macsist.assistant.{_name}", None
+        )
+    dist_center.addObserver_selector_name_object_(
+        _remote_relay, "remoteShowMemory:", "com.macsist.showMemory", None
+    )
+    for _name, _sel in (   # M20 `macsist memory backfill|distill|profile`
+        ("backfill", "remoteMemoryBackfill:"),
+        ("distill", "remoteMemoryDistill:"),
+        ("profile", "remoteMemoryProfile:"),
+    ):
+        dist_center.addObserver_selector_name_object_(
+            _remote_relay, _sel, f"com.macsist.memory.{_name}", None
         )
     # M11 hook: switch the language like a Settings save would, at given
     # times — live-switch verification. Format: "<sec>:<code>[,<sec>:<code>…]"

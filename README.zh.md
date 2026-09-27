@@ -30,6 +30,7 @@
 - **🌍 6 种语言** —— 한국어 · English · 简体中文 · 日本語 · Français · Deutsch，**界面与回答**皆可。在设置中实时切换，无需重启。其他语言的输入会先附上自然的 `翻译：` 一行。
 - **🪟 液态玻璃面板** —— 半透明、圆角、自动调整大小的面板在光标旁淡入。**抓住背景即可拖动**到任意位置。
 - **🗂 历史记录** —— 每次解释都本地保存并可搜索（`⌘⇧H`）。可复制、用当前模型**再次提问**（区域条目会重发已保存的截图），或删除某个会话 —— 全在聊天式窗口中完成。
+- **🧠 记忆** —— 读过的内容会累积成**关于你兴趣的文件**。每次解释之后，本地模型会在后台把其中的概念整理成 `memory/notes/*.md` 下的 Markdown 笔记（你可以随时阅读和编辑）；下次遇到相关内容时，解释会**接着你之前看过的东西**讲。检索在本机即时完成 —— 热键路径上没有额外的 LLM 调用，面板速度和以前完全一样。提炼默认**只使用本地模型**。
 - **🔌 你的模型，你做主** —— 运行**本地** MLX 服务器，或将 Macsist 指向任意 **OpenAI 兼容 API**（OpenRouter 等）。API 密钥保存在 macOS **钥匙串**中，绝不落盘。
 - **🔒 默认私密** —— 本地优先，无遥测，无 Electron。真正签名的 `.app` 包：Dock、Cmd-Tab 和权限列表都以图标显示为 **Macsist**。
 
@@ -152,6 +153,7 @@ app/run.sh                  # …或在前台运行 App 以便开发
 | `macsist status` | 代理、服务器健康、提供方/模型、TCC 状态 |
 | `macsist logs [app\|server] [-f]` | tail 对应的日志文件 |
 | `macsist settings` / `macsist history` | 打开主窗口 |
+| `macsist memory [status\|list\|show\|backfill\|distill\|profile\|open\|retire-cache]` | 记忆：查看笔记、从既有历史一次性构建（backfill）、重写兴趣画像、让旧缓存退役 |
 | `macsist doctor` | 完整 ✓/✗ 诊断：部署、配置、钥匙串密钥、健康、TCC、模型缓存 |
 | `macsist update` | `git pull --ff-only` + 重新部署两个代理 |
 

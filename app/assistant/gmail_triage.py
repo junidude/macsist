@@ -20,25 +20,7 @@ from i18n import t
 from llm_client import LLMClient
 
 from assistant.gmail_client import GmailClient, _addr
-from assistant.llm_util import complete_text, extract_json
-
-
-class _ForceLocalConfig:
-    """A config view that pins active_provider() to the first is_local provider,
-    delegating everything else. Used to keep Gmail triage on the local server
-    without mutating the shared ConfigStore (which other requests read)."""
-
-    def __init__(self, config):
-        self._config = config
-
-    def active_provider(self):
-        providers = [p for p in (self._config.get("providers") or [])
-                     if isinstance(p, dict)]
-        local = next((p for p in providers if p.get("is_local")), None)
-        return dict(local) if local else self._config.active_provider()
-
-    def __getattr__(self, name):
-        return getattr(self._config, name)
+from assistant.llm_util import ForceLocalConfig, complete_text, extract_json
 
 
 def _resub(subject):
@@ -51,7 +33,7 @@ def _resub(subject):
 class GmailTriager:
     def __init__(self, config):
         self.config = config
-        triage_cfg = (_ForceLocalConfig(config)
+        triage_cfg = (ForceLocalConfig(config)
                       if bool(config.get("gmail_force_local_llm")) else config)
         self.client = GmailClient(config)
         self.llm = LLMClient(triage_cfg)

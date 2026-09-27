@@ -12,6 +12,8 @@
 #   macsist approve <id>       approve a pending proposal (M14)
 #   macsist scan               run one proactive cycle now (M14)
 #   macsist tg "<msg>"         send a test message to Telegram (M15)
+#   macsist memory [status|list|show <slug>|backfill|distill|profile|open
+#                   |retire-cache]   기억: 읽은 것에서 자란 노트 (M20)
 #   macsist doctor             full diagnosis (✓/✗ per check)
 #   macsist update             git pull + redeploy
 #
@@ -255,6 +257,56 @@ cmd_tg() {  # M15: send a test message to Telegram via Hermes (no app/gateway ne
     "$HB" send -t telegram "$text"
 }
 
+_memory_run() {  # configure.py 는 --text 로 사람이 읽을 형식을 직접 낸다.
+    # 거부 사유(기억 비어 있음 등)도 stdout 으로 오므로 그대로 보여주고,
+    # 정말 아무 말도 없이 실패했을 때만 일반 안내로 대체한다.
+    local out rc
+    out="$("$(pybin)" "$CONFIGURE" "$@" 2>/dev/null)"; rc=$?
+    if [[ -n "$out" ]]; then echo "$out"
+    else echo "기억 명령이 실패했습니다 (macsist doctor 확인)"; fi
+    return $rc
+}
+
+cmd_memory() {  # M20: 기억 — 읽은 것에서 자라는 파일시스템 기억
+    local sub="${1:-status}"; shift || true
+    local mem_dir="$SUPPORT_DIR/memory"
+    case "$sub" in
+        status) _memory_run memory-status --text "$@" ;;
+        list)   "$(pybin)" "$CONFIGURE" memory-list "$@" 2>/dev/null ;;
+        show)
+            [[ $# -ge 1 ]] || { echo "사용법: macsist memory show <slug>"; return 2; }
+            "$(pybin)" "$CONFIGURE" memory-show "$1" 2>/dev/null
+            ;;
+        backfill)   # 앱이 기억의 유일한 writer — 증류는 실행 중인 앱에 부탁한다
+            if ! agent_loaded "$APP_LABEL"; then
+                echo "앱이 실행 중이 아닙니다 — macsist start app"; return 1
+            fi
+            post_notification "com.macsist.memory.backfill"
+            echo "기록 전체를 기억으로 정리하기 시작했습니다 (로컬 LLM, 수십 분 소요)."
+            echo "진행 확인: macsist logs app -f | grep memory"
+            ;;
+        distill)
+            agent_loaded "$APP_LABEL" || { echo "앱이 실행 중이 아닙니다"; return 1; }
+            post_notification "com.macsist.memory.distill"
+            echo "대기 중인 읽기 기록을 정리합니다."
+            ;;
+        profile)
+            agent_loaded "$APP_LABEL" || { echo "앱이 실행 중이 아닙니다"; return 1; }
+            post_notification "com.macsist.memory.profile"
+            echo "관심사 프로필을 다시 만듭니다."
+            ;;
+        open)
+            agent_loaded "$APP_LABEL" && post_notification "com.macsist.showMemory"
+            if [[ -d "$mem_dir" ]]; then open "$mem_dir"
+            else echo "기억 폴더가 아직 없습니다 — macsist memory backfill"; fi
+            ;;
+        retire-cache)  # 기억이 장기 저장을 맡았으니 설명 기록은 짧은 롤링 버퍼로
+            _memory_run memory-retire-cache --text "$@"
+            ;;
+        *) echo "알 수 없는 memory 명령: $sub"; return 2 ;;
+    esac
+}
+
 cmd_doctor() {
     load_cfg
     local fails=0
@@ -405,6 +457,15 @@ cmd_doctor() {
     [[ "$CAL_ON" == 1 ]] && echo "  · calendar_enabled=on (폴링 활성)" \
                          || echo "  · calendar_enabled=off (Settings에서 켜기)"
 
+    echo "[기억 (M20)]"
+    local MEM_OUT
+    MEM_OUT="$("$(pybin)" "$CONFIGURE" memory-status --limit 0 --doctor 2>/dev/null)"
+    if [[ -n "$MEM_OUT" ]]; then
+        echo "$MEM_OUT" | sed "s/^OK /  $C_OK /; s/^WARN /  $C_WARN /; s/^DOT /  · /"
+    else
+        echo "  $C_WARN 기억을 읽을 수 없습니다 (memory/ 접근 확인)"
+    fi
+
     echo
     if [[ "$fails" == 0 ]]; then
         echo "모든 핵심 점검 통과 ✨"
@@ -428,7 +489,7 @@ cmd_update() {
     echo "완료. macsist status 로 확인하세요."
 }
 
-usage() { sed -n '4,12p' "$SELF" | sed 's/^# \{0,3\}//'; }
+usage() { sed -n '4,16p' "$SELF" | sed 's/^# \{0,3\}//'; }
 
 case "${1:-__default__}" in
     __default__) cmd_start ""; echo; cmd_status ;;
@@ -447,6 +508,7 @@ case "${1:-__default__}" in
     gmail)   shift; cmd_gmail "$@" ;;
     calendar) shift; cmd_calendar "$@" ;;
     tg)      shift; cmd_tg "$@" ;;
+    memory)  shift; cmd_memory "$@" ;;
     doctor)  cmd_doctor ;;
     update)  cmd_update ;;
     help|-h|--help) usage ;;

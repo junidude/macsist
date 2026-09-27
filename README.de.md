@@ -30,6 +30,7 @@ Markiere etwas Text — einen fremdsprachigen Satz, einen dichten Absatz, eine F
 - **🌍 6 Sprachen** — 한국어 · English · 简体中文 · 日本語 · Français · Deutsch, für **Oberfläche und Antworten**. In den Einstellungen live umschaltbar, ohne Neustart. Eine Eingabe in einer anderen Sprache erhält zuerst eine natürliche `Übersetzung:`-Zeile.
 - **🪟 Liquid-Glass-Panel** — ein durchscheinendes, abgerundetes, selbstgrößendes Panel, das am Cursor einblendet. **Zieh es am Hintergrund** überallhin.
 - **🗂 Verlauf** — jede Erklärung wird lokal gespeichert und ist durchsuchbar (`⌘⇧H`). Kopieren, mit dem aktuellen Modell **erneut fragen** (Bereichseinträge senden den gespeicherten Screenshot erneut) oder eine Sitzung löschen — alles in einem Chat-artigen Fenster.
+- **🧠 Gedächtnis** — was du liest, wächst zu **Dateien über deine Interessen**. Nach jeder Erklärung destilliert das lokale Modell im Hintergrund die Begriffe dahinter in Markdown-Notizen unter `memory/notes/*.md` (zum Lesen und Bearbeiten), und wenn später etwas Verwandtes auftaucht, **knüpft die Erklärung an das an, was du schon gesehen hast**. Das Abrufen läuft sofort und auf dem Gerät — kein zusätzlicher LLM-Aufruf im Hotkey-Pfad, das Panel ist genauso schnell wie vorher. Die Destillation nutzt standardmäßig **nur das lokale Modell**.
 - **🔌 Dein Modell, deine Wahl** — betreibe einen **lokalen** MLX-Server oder richte Macsist auf jede **OpenAI-kompatible API** (OpenRouter usw.). API-Schlüssel liegen im macOS-**Schlüsselbund**, nie auf der Festplatte.
 - **🔒 Standardmäßig privat** — lokal zuerst, keine Telemetrie, kein Electron. Ein echtes signiertes `.app`-Bundle: Dock, Cmd-Tab und die Berechtigungslisten zeigen alle **Macsist** mit Symbol.
 
@@ -152,6 +153,7 @@ Von `install.sh` als Symlink in deinem `PATH` installiert — funktioniert aus j
 | `macsist status` | Agents, Serverzustand, Anbieter/Modelle, TCC-Status |
 | `macsist logs [app\|server] [-f]` | die passenden Logdateien verfolgen |
 | `macsist settings` / `macsist history` | das Hauptfenster öffnen |
+| `macsist memory [status\|list\|show\|backfill\|distill\|profile\|open\|retire-cache]` | Gedächtnis: Notizen ansehen, aus dem bestehenden Verlauf aufbauen (backfill), Profil neu erstellen, alten Cache stilllegen |
 | `macsist doctor` | vollständige ✓/✗-Diagnose: Deploy, Konfig, Schlüsselbund-Schlüssel, Zustand, TCC, Modell-Cache |
 | `macsist update` | `git pull --ff-only` + erneutes Deployen beider Agents |
 

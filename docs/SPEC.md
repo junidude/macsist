@@ -113,10 +113,15 @@ installer**, and a **`macsist` CLI launcher**. No Electron.
 | `health.py` | `ServerHealthMonitor` — polling thread, ok/loading/down, `poke()`; M9: local providers `GET /health`, external authed `GET /v1/models` |
 | `keychain.py` | M9 — `security` CLI wrapper (`set/get/delete_key`, `resolve_key`: ""/`env:VAR`/account); keys never in config/logs |
 | `result_panel.py` | floating panel — never-key except while the follow-up input is focused (`_allow_key` gate, M6); NSEvent monitors for dismiss/click-to-focus/two-stage Esc; streaming transcript + bottom input row |
-| `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping); M7 history commit + `resubmit_text` (re-ask) |
+| `explain_controller.py` | hotkey → worker thread → `callAfter`; generation counter (main-thread staleness check); global preemption; M6 follow-up session (`_session`, `submitFollowUp`, turn capping); M7 history commit + `resubmit_text` (re-ask); M20 `_memoryBlock()` pre-stream recall + `_remember()` post-commit enqueue |
 | `settings_window.py` | `SettingsPaneController` — settings controls built into a host view (combos / recorders / detail segments / 고급 flap); window-less since M7 |
-| `main_window.py` | `MainWindowController` — History/Settings window (NSTabView, master-detail history list, search, copy/re-ask, 기록 저장·항상 위 toggles) |
-| `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune/rewrite + `delete_records` (M11) |
+| `main_window.py` | `MainWindowController` — main window (NSTabView: 기록/기억/비서/설정, master-detail lists, shared search field dispatched per tab, copy/re-ask, 기록 저장·항상 위 toggles) |
+| `history_store.py` | `HistoryStore` — append-only JSONL, main-thread-only, atomic prune/rewrite + `delete_records` (M11); **M20: a short rolling buffer** (`memory_history_rolling`), not the long-term record |
+| `memory/store.py` | M20 — `MemoryStore`: `notes/*.md` (source of truth) + derived `index.json`, ingestion queue (`pending.jsonl` + cursor), and the LLM-free IDF/query-coverage `recall()` that runs in the hotkey path |
+| `memory/recall.py` | M20 — `recall_block()`: the advisory system-prompt suffix (related notes + reader profile), budget-capped |
+| `memory/distiller.py` | M20 — `MemoryDistiller`: readings → concepts as strict JSON on the **local** LLM (`ForceLocalConfig`), `upsert` per concept, `profile.md` rewrite |
+| `memory/monitor.py` | M20 — `MemoryMonitor` (`health.py` clone): drains the queue every `memory_tick_interval`, resumable `backfill()` from `history.jsonl` |
+| `memory/tab.py` | M20 — `MemoryTabController`: the 기억 tab (note cards + note markdown / 관심사 프로필, forget, reveal folder) |
 | `i18n.py` | M11 — UI strings (6 languages) + per-language prompt defaults; `t()` / `set_language()`; pure data, stdlib-only |
 | `config.py` | JSON store at `~/Library/Application Support/Macsist/config.json`; prompt keys resolve per `language` (M11, §5.7); `asset_dir()` (M12 — RESOURCEPATH/번들 분기) |
 | `setup.py` | M12 — py2app 빌드 설정 (Info.plist, packages, extra_scripts) |
@@ -144,6 +149,22 @@ via authed `GET /v1/models` over the internet),
 (per-mode), `history_max_items`, `history_snippet_chars`
 (= `capture_max_chars` by default so text inputs are stored losslessly for
 re-ask), `history_window_floating`.
+M20 기억: `memory_enabled` (master), `memory_recall_enabled` /
+`memory_inject_profile` (prompt injection), `memory_local_only` (distil only on
+an `is_local` provider — the reading history must not follow a provider switch
+out to the internet), `memory_model`, `memory_tick_interval`,
+`memory_batch_size`, `memory_max_batches_per_tick`, `memory_snippet_chars`,
+`memory_distill_input_chars` / `memory_distill_response_chars` /
+`memory_distill_max_tokens`, `memory_max_concepts`, `memory_summary_chars`,
+`memory_known_notes`, `memory_recall_top_k`, `memory_recall_min_score`
+(query-coverage 0~1 — scale-free, so the cutoff means the same at 5 notes and
+at 500) + `memory_recall_min_mass` (absolute IDF floor — kills the 2-char
+Korean-prefix false positive), `memory_recall_summary_chars`,
+`memory_recall_max_chars`, `memory_profile_domains` / `_notes` / `_every` /
+`_max_tokens`, `memory_history_rolling`. The 7 prompts
+(`memory_distill_system`/`_user`, `memory_profile_system`/`_user`,
+`memory_recall_preamble`/`_line`/`_profile`) are `_LANG_KEYS` — resolved from
+`i18n.PROMPT_DEFAULTS` per language.
 
 ### Debug hooks (env vars, kept for agent-driven verification)
 `HE_DEBUG_EXPLAIN_AFTER` / `HE_DEBUG_EXPLAIN_REGION_AFTER` (comma-separated
@@ -151,7 +172,8 @@ seconds — fire hotkey paths programmatically), `HE_DEBUG_FAKE_TEXT` (bypass
 capture), `HE_DEBUG_REGION_RECT="x,y,w,h"` (bypass interactive overlay),
 `HE_DEBUG_KEEP_PANEL` (don't install dismiss monitors — note: also disables
 M6 click-to-focus, which lives in the local monitor), `HE_DEBUG_FRAME`,
-`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_OPEN_SETTINGS` / `HE_DEBUG_OPEN_HISTORY`
+`HE_DEBUG_OPEN_MENU`, `HE_DEBUG_OPEN_SETTINGS` / `HE_DEBUG_OPEN_HISTORY` /
+`HE_DEBUG_OPEN_ASSISTANT` / `HE_DEBUG_OPEN_MEMORY`
 (seconds — open the main window on that tab), `HE_DEBUG_WIN_ORIGIN="x,y"`
 (main-window origin),
 `HE_DEBUG_FOLLOWUP_AFTER` (comma-separated seconds — submit a follow-up
@@ -538,6 +560,90 @@ configure.py 실행 — 단독 실행 가능 실증), 알림은 `macsist_notify`
 목록에 등록되고, grant 즉시 `_AXGrantWaiter`가 EXECUTABLEPATH 재실행으로
 이벤트 탭을 붙인다 (라이브 이행에서 그대로 관찰됨).
 
+### 5.9 기억(Memory) — 읽은 것에서 자라는 파일시스템 기억 (M20, as built)
+
+**문제.** 3개월 동안 173건을 설명받았는데, 앱은 그것을 `history.jsonl`이라는
+**죽은 캐시**로만 갖고 있었다. 같은 개념(GAE, OMOP CDM…)을 두 번째로 선택해도
+앱은 처음 본 것처럼 설명한다. 사용자가 원한 것: 읽은 것이 쌓여 **관심사가
+파일로 형성**되고, 비슷한 것을 만나면 **이전에 본 것과 이어서** 설명하며, 그
+다음에는 **옛 캐시를 버리는** 것. 전부 로컬 Qwen3.8-27B로.
+
+**두 속도로 쪼갠다 (핵심 결정).** 핫키→패널 지연은 제품의 심장이므로 읽기
+경로에는 LLM을 절대 넣지 않는다.
+
+| | 핫패스 (핫키 누른 순간) | 콜드패스 (백그라운드) |
+|---|---|---|
+| 하는 일 | `MemoryStore.recall(text)` → 시스템 프롬프트에 블록 주입 | 끝난 읽기를 개념으로 증류해 노트에 접기 |
+| 비용 | 마이크로초, 네트워크 0회 (인메모리 인덱스) | 배치당 LLM 1회 (로컬, 약 90초) |
+| 실행 | explain 워커 스레드 | `MemoryMonitor` 데몬 (`memory_tick_interval`) |
+
+임베딩은 쓰지 않는다 — 스택이 vlm-only라 `/v1/embeddings`가 아예 없다. 대신
+**IDF 항목겹침 + 질의 커버리지**로 검색한다. 한국어는 **접두사 색인**으로
+푼다: "강화학습을"은 강화/강화학/강화학습을 낸다(조사가 뒤에 붙으니 접두사가
+곧 어간). 질의측과 색인측이 **같은 `terms_of()`** 를 쓴다 — 토크나이저가
+비대칭이면 어휘 검색은 조용히 안 맞기 시작한다.
+
+점수 = **질의 커버리지**: "이 기억이 아는 질의 항목들의 IDF 질량 중 이 노트가
+덮는 비율". 문서측이 아니라 질의측으로 정규화하는 이유는 임계값이 노트 5개일
+때와 500개일 때 **같은 뜻**을 갖게 하기 위해서다(절대 IDF 합은 코퍼스와 함께
+자라서 컷오프가 "너무 느슨함"에서 "아무것도 안 걸림"으로 표류한다). 기억이 한
+번도 못 본 낱말은 분모에서 제외한다 — 캡처에 섞인 무관한 단어가 나머지를
+제대로 덮는 노트를 희석해서는 안 된다. 2차 관문 `memory_recall_min_mass`가
+"한글 2글자 접두사 하나만 맞은" 오탐을 막는다.
+
+**주입은 조언이다, 사실이 아니다.** 프롬프트 블록은 "정말 관련 있을 때만 한
+줄로 이어 언급하고, 아니면 이 블록을 완전히 무시하라"고 지시한다. 어휘 검색의
+오탐이 설명 속 **틀린 단정**으로 승격되어서는 안 되기 때문이다. 블록 어디에도
+"이 노트들이 관련 있다"는 주장은 없다.
+
+**파일 레이아웃** (`…/Application Support/Macsist/memory/`):
+```
+notes/<slug>.md   개념 하나 = 파일 하나. frontmatter(title/aliases/terms/
+                  seen/first_ts/last_ts/links) + 한 줄 요약 + "## seen in"
+                  (마주친 맥락, 최신 8개). ASCII slug — 한글 파일명은 NFC/NFD
+                  정규화가 쓰는 쪽마다 달라 "같은 노트"가 두 파일이 된다.
+index.json        파생 캐시. 노트 mtime이 움직인 것만 재파싱 → 사용자가
+                  에디터로 고친 노트가 다음 로드에 그대로 반영된다.
+pending.jsonl     수집 큐(append-only + state.json 커서). 설명이 끝나면 한 줄
+                  추가가 핫패스가 내는 유일한 비용. 서버가 죽어 있어도 읽은
+                  것은 사라지지 않는다.
+profile.md        관심사 프로필(LLM). 기억이 스스로를 요약한 것.
+```
+**노트가 진실원천, index.json은 캐시** — 사용자가 직접 읽고 고칠 수 있는
+마크다운이어야 한다는 게 "file system으로 형성"의 요구였다.
+
+**불변식 / 게이트**
+- **로컬 전용** (`memory_local_only`, 기본 True): 증류는 첫 `is_local`
+  프로바이더에 고정된다(`llm_util.ForceLocalConfig` — M17 Gmail triage와 공유).
+  읽은 기록은 앱이 가진 가장 사적인 데이터다. **설명 프로바이더를 외부로
+  바꿨다는 이유로 독서 이력이 인터넷으로 나가서는 안 된다.**
+- **실패해도 항목을 잃지 않는다:** 서버 다운·응답 절단·JSON 파싱 실패는 0을
+  반환하고 **커서를 전진시키지 않는다** → 다음 틱에 재시도. 커서는 배치 단위로
+  움직이므로 백필은 중간에 앱이 죽어도 이어서 간다.
+- **쓰는 프로세스는 앱 하나:** CLI는 파일을 직접 **읽고**, 쓰는 일(backfill/
+  distill/profile)은 분산 알림으로 실행 중인 앱에 부탁한다. 두 프로세스가 같은
+  노트를 접으면 경쟁한다.
+- **AppKit 분리:** `memory/` 는 `tab.py`만 AppKit을 쓴다 → `cli/configure.py`가
+  stdlib-only 규약을 유지한 채 (`/usr/bin/python3`로도) 기억을 읽는다.
+- 영역(region) 캡처는 스트림 전에 대조할 텍스트가 없다(픽셀뿐) → 리콜 없이
+  **읽는 사람 프로필만** 주입하고, 답변은 끝난 뒤 정상적으로 기억에 들어간다.
+
+**캐시 은퇴 (사용자 결정: 롤링 창).** 기억이 장기 기록을 맡은 뒤
+`macsist memory retire-cache`가 `history_max_items`를
+`memory_history_rolling`(20)로 낮추고 즉시 프루닝한다 — 기존
+`HistoryStore._prune`이 JSONL을 원자적으로 재작성하면서 살아남은 레코드가
+참조하지 않는 캡처 PNG까지 지우므로 `history_images/`의 용량도 함께 회수된다.
+기억이 비어 있거나 큐에 미증류 항목이 남아 있으면 **거부한다** — 그 읽기들의
+유일한 다른 사본이 바로 그 캐시이기 때문이다. 기록 탭·다시 질문·카드 삭제
+(M7/M11)는 짧은 버퍼 위에서 그대로 동작한다.
+
+**CLI / UI**
+- `macsist memory [status|list|show <slug>|backfill|distill|profile|open|
+  retire-cache]`
+- 사이드바 **기억** 탭: 노트 카드(제목/요약/분야/횟수/최근) + 선택한 노트의
+  마크다운 원문, 선택 없으면 관심사 프로필. 공유 검색 필드는 보이는 탭에 따라
+  분기한다. "이 기억 삭제"는 파일을 지우고 인덱스를 다시 접는다.
+
 ---
 
 ## 6. Milestones
@@ -724,6 +830,46 @@ memory `verify-ui-without-screenshots`).
   "[건너뜀 — 이미 완료]" — 새로 빌드된 번들이 csreq로 grant 승계, 이행 AC)·
   서버 chat 프로브·앱 왕복 스모크까지 rc=0 완주; 라이브 상태 복원 후
   권한·핫키 정상.
+- **M20 — 기억(Memory)** (§5.9). **DONE (2026-09-27).**
+  읽은 것이 `memory/notes/*.md` 로 자라고, 관련된 것을 만나면 설명이 이전 것과
+  이어지며, 그 다음 옛 `history.jsonl` 캐시는 짧은 롤링 버퍼로 은퇴한다. 전부
+  로컬 Qwen3.8-27B (`memory_local_only`).
+  *AC:* ① 기존 기록 전체가 한 번에 기억으로 형성된다(backfill, 중단 후 이어감).
+  ② 관련된 새 용어를 설명할 때 이전 노트를 한 줄로 이어 언급하고, 무관한
+  캡처에서는 언급하지 않는다. ③ 핫키 경로에 LLM 호출이 늘지 않는다.
+  ④ 노트는 사용자가 직접 읽고 고칠 수 있으며 고친 내용이 다음 로드에 반영된다.
+  ⑤ 은퇴 후에도 기록 탭·다시 질문·카드 삭제가 동작한다. ⑥ 6개 언어 키 완비.
+  *AC verified (2026-09-27, live):* **백필** — `macsist memory backfill` 이
+  실행 중인 앱에 위임되어 173건을 seed 후 배치 4건씩 증류(로컬 27B bf16:
+  prefill 1.6k tok @520 tok/s + decode ~450 tok @9.7 tok/s ≒ 배치당 50초),
+  중간 재배포로 앱이 죽어도 `state.json` 커서에서 이어감(재시드는 ts+mode+input
+  dedupe로 no-op). **이어서 설명** — `Fowlkes-Mallows index…` 캡처에서 리콜이
+  Adjusted Rand Index(0.555)/Batch Silhouette(0.555)를 올리고 답변이
+  "앞서 본 Adjusted Rand Index(ARI)와 Batch Silhouette와 마찬가지로 … ARI가
+  전체 쌍의 일치/불일치를 본다면 FMI는 …" 로 **'쉽게 말하면' 항목 안에서**
+  이어 설명(4단 형식 유지, 새 제목 생성 없음). **무관 캡처** — 주택임대차
+  갱신요구권 문장에서 리콜 0건 → 프로필 줄(123자)만 주입, 답변에 기억 언급 0회.
+  **첫 시도는 실패했고 그게 설계를 고쳤다**: 최초 프리앰블은 "관련 없으면
+  무시"만 강하게 말해 모델이 관련된 경우에도 침묵했다 → 긍정형("이어지면 반드시
+  한 문장으로")+배치 지정('쉽게 말하면' 안, 새 항목 금지)으로 고쳐 통과.
+  **검색 정확도** — 13개 질의 중 12개 기대대로(ARI/OMOP/XAI/GAE 한글·영문·
+  약자 질의 적중, 점심/git/전세/영문 pangram 0건). 남은 1개는 단독 "표준"
+  질의가 OMOP CDM을 올린 것 — 노트가 5개뿐인 코퍼스에서는 사실상 맞는 답이고,
+  블록 자체가 조언이라 오탐이 단정으로 승격되지 않는다. **정규화 결함 2건이
+  라이브에서 잡혔다**: (a) 최초 점수식이 문서 길이로 나눠 `GAE와 PPO의 차이`가
+  GAE 노트를 못 찾음 → 질의 커버리지로 교체, (b) 모델이 같은 분야를
+  "노화 생물학"/"노화생물학"으로 번갈아 써서 관심 분야가 둘로 갈림 →
+  `domains()` 가 공백·대소문자 정규화 키로 집계하고 최빈 표기를 보여준다.
+  **UI** — 기억 탭이 6개 언어 전부에서 빌드/refresh 통과(`HE_DEBUG_OPEN_MEMORY`
+  라이브 확인: `sidebar selected memory` → `main window shown tab=memory`,
+  예외 0), 기억 저장·로컬만 스위치가 즉시 반영. **PyObjC 함정 재발** —
+  5인자 헬퍼를 `_switchAt_title_action_` 으로 두자 import 시
+  `BadPrototypeError` → 모듈 레벨 함수로 이동(§7-14⑧, 프로젝트 메모리
+  `pyobjc-selector-arg-naming`). **stdlib-only 회귀 방지** —
+  `app/memory/__init__.py` 가 distiller를 import 하자 `cli/configure.py` 가
+  httpx 없이 죽었다 → `__init__.py` 를 import-free로 유지(§7-14⑧).
+  `macsist memory status|list|show|backfill|distill|profile|open|retire-cache`
+  + `macsist doctor` 의 `[기억 (M20)]` 섹션 동작 확인.
 
 ---
 
@@ -791,6 +937,22 @@ memory `verify-ui-without-screenshots`).
     `ditto`만 (cp -R은 서명 깨짐). ⑦ setup.py `packages`에 네임스페이스
     패키지(PyObjCTools)나 미설치 패키지(sniffio)를 넣으면 modulegraph가
     죽는다.
+14. **기억(M20):** ① **핫패스에 LLM 금지** — 리콜은 인메모리 IDF 겹침이다.
+    핫키→패널 지연이 제품의 심장이라, "관련 기억"을 찾으려 모델을 한 번 더
+    부르는 순간 제품이 망가진다. ② 점수는 **질의측**으로 정규화한다(커버리지
+    0~1). 절대 IDF 합은 코퍼스와 함께 자라서 고정 컷오프가 표류한다. ③ 질의측과
+    색인측은 **같은 `terms_of()`** 를 써야 한다 — 비대칭 토크나이저는 어휘
+    검색이 조용히 안 맞는 고전적 원인. ④ 주입 블록은 **조언**이다: 오탐이
+    설명 속 단정으로 승격되면 안 되므로 "관련 없으면 무시하라"가 프롬프트에
+    박혀 있어야 한다. ⑤ `memory_local_only` — 독서 이력은 프로바이더를 외부로
+    바꿨다고 따라 나가면 안 된다. ⑥ 증류 실패 시 **커서를 전진시키지 않는다**
+    (재시도 ≫ 유실). ⑦ 기억을 쓰는 프로세스는 **앱 하나** — CLI는 읽고, 쓰기는
+    분산 알림으로 부탁한다. ⑧ `app/memory/__init__.py`는 **import를 두지 않는다**
+    — `from memory.store import …`가 distiller→llm_client→httpx를 끌고 오면
+    `cli/configure.py`의 stdlib-only 보장이 깨진다(실제로 한 번 깨졌다).
+    ⑨ 노트 파일명은 **ASCII slug** — 한글 파일명은 NFC/NFD 정규화가 쓰는 쪽마다
+    달라 같은 개념이 두 파일이 된다. ⑩ `retire-cache`는 기억이 비었거나 큐에
+    미증류 항목이 남아 있으면 거부한다 — 그 읽기들의 다른 사본은 그 캐시뿐이다.
 
 ---
 

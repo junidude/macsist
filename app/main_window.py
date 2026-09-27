@@ -94,6 +94,7 @@ from Foundation import (
 from assistant import risk
 from config import asset_dir
 from i18n import current_language, t
+from memory.tab import MemoryTabController
 from settings_window import SettingsPaneController, pane_min_size
 from ui_kit import (
     FlippedView as _FlippedView,
@@ -488,6 +489,7 @@ class _SidebarController(NSObject):
 
     _ITEMS = (  # (key, i18n label key, SF Symbol)
         ("history", "history.nav_history", "clock.arrow.circlepath"),
+        ("memory", "history.nav_memory", "brain"),        # M20
         ("assistant", "history.nav_assistant", "sparkles"),
         ("settings", "history.nav_settings", "gearshape"),
     )
@@ -624,6 +626,11 @@ class MainWindowController(NSObject):
         self.floating_switch = None
         self._all = []  # all sessions, newest first
         self._filtered = []  # sessions currently in the list
+        # M20 기억: set by main.py right after construction (the window itself is
+        # built lazily on first show, so the tab always sees the real store).
+        self.memory = None
+        self.memory_monitor = None
+        self.memory_tab = None
         history.on_appended = self._historyAppended
         return self
 
@@ -637,6 +644,9 @@ class MainWindowController(NSObject):
 
     def showAssistant(self):
         self._show_("assistant")
+
+    def showMemory(self):
+        self._show_("memory")
 
     def runOnboardingIfNeeded(self):
         """First run of a downloaded .app (M13): the user hasn't picked a
@@ -739,10 +749,35 @@ class MainWindowController(NSObject):
     def _refreshTab_(self, tab_id):
         if tab_id == "history":
             self.refreshHistory()
+        elif tab_id == "memory":
+            self.refreshMemory()
         elif tab_id == "assistant":
             self.refreshAssistant()
         else:
             self.settings.refresh()
+
+    # -- memory (M20: the 기억 tab) ----------------------------------------------
+
+    def refreshMemory(self):
+        if self.memory_tab is not None:
+            self.memory_tab.refresh()
+
+    def memoryChanged(self):
+        """MemoryStore/monitor callback, already marshalled to the main thread
+        by main.py. Only repaint while the tab is actually on screen — a
+        backfill fires this once per batch."""
+        if (self.window is None or not self.window.isVisible()
+                or self.tab_view is None):
+            return
+        if str(self.tab_view.selectedTabViewItem().identifier()) == "memory":
+            self.refreshMemory()
+
+    def _memoryRebuildProfile(self):
+        if self.memory_monitor is not None:
+            import threading
+            threading.Thread(
+                target=self.memory_monitor.distiller.profile,
+                name="memory-profile", daemon=True).start()
 
     def tabView_didSelectTabViewItem_(self, tab_view, item):
         # programmatic selection also lands here — same refresh as the menu
@@ -978,6 +1013,20 @@ class MainWindowController(NSObject):
         item = NSTabViewItem.alloc().initWithIdentifier_("history")
         item.setLabel_("History")
         item.setView_(history_view)
+        self.tab_view.addTabViewItem_(item)
+
+        memory_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, cw, ch))
+        if self.memory is None:
+            # standalone window builds (the _uiaudit harness) get their own store
+            from memory.store import MemoryStore
+            self.memory = MemoryStore(self.config)
+        self.memory_tab = MemoryTabController.alloc().initWithConfig_store_(
+            self.config, self.memory)
+        self.memory_tab.on_profile = self._memoryRebuildProfile
+        self.memory_tab.buildInView_(memory_view)
+        item = NSTabViewItem.alloc().initWithIdentifier_("memory")
+        item.setLabel_("Memory")
+        item.setView_(memory_view)
         self.tab_view.addTabViewItem_(item)
 
         assistant_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, cw, ch))
@@ -1924,6 +1973,13 @@ class MainWindowController(NSObject):
             self.refreshHistory()
 
     def searchChanged_(self, sender):
+        # one search field, dispatched by the visible tab (M20 added 기억)
+        if (self.tab_view is not None
+                and str(self.tab_view.selectedTabViewItem().identifier())
+                == "memory"):
+            if self.memory_tab is not None:
+                self.memory_tab.applyFilter_(self.search_field.stringValue())
+            return
         self.applyFilter()
 
     # session list datasource/delegate — rounded card cells (Codex-style)

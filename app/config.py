@@ -253,6 +253,48 @@ DEFAULTS = {
     "calendar_conflict_enabled": True,      # alert on cross-source double-booking
     "calendar_telegram_when_away": True,    # mirror alerts to Telegram when away
     "gcal_oauth_enabled": False,            # later: Google OAuth API path
+    # ── M20 기억(Memory): 읽은 것에서 자라는 파일시스템 기억 ─────────────
+    # notes/*.md 가 진실원천, index.json 은 파생 캐시(memory/store.py). 검색은
+    # LLM 없이 IDF 항목겹침으로 핫키 경로에서 돌고, "이게 무슨 개념인가"는
+    # 백그라운드에서 로컬 LLM이 정리한다. 프롬프트 7개는 _LANG_KEYS(언어별).
+    "memory_enabled": True,
+    "memory_recall_enabled": True,      # 설명 프롬프트에 관련 기억 주입
+    "memory_inject_profile": True,      # "이 사람은 이런 분야를 읽는다" 한 줄
+    # 읽은 기록은 앱이 가진 가장 사적인 데이터 — 설명 프로바이더를 외부로
+    # 바꿨다고 해서 기억 증류가 외부로 나가면 안 된다 (ForceLocalConfig).
+    "memory_local_only": True,
+    "memory_model": "",                 # "" => 활성 프로바이더의 explain_model
+    "memory_tick_interval": 180.0,      # 증류 데몬 깨우기 주기
+    "memory_batch_size": 4,             # 한 번의 LLM 호출에 담는 읽기 기록 수
+    "memory_max_batches_per_tick": 3,
+    "memory_snippet_chars": 4000,       # 큐 레코드 상한
+    "memory_distill_input_chars": 400,  # 프롬프트에 넣는 '읽은 것' 길이
+    "memory_distill_response_chars": 700,  # 설명은 앞부분이 개념을 다 말해준다
+    "memory_distill_max_tokens": 1200,
+    "memory_max_concepts": 3,           # 읽기 기록 하나에서 뽑을 개념 상한
+    "memory_summary_chars": 220,
+    "memory_known_notes": 60,           # links용으로 모델에 보여줄 기존 slug 수
+    "memory_recall_top_k": 3,
+    # 점수는 '질의 커버리지'(0~1) — 코퍼스가 5개일 때와 500개일 때 임계값이 같은
+    # 뜻을 갖게 하려는 질의측 정규화(store.recall 주석). min_mass는 2차 관문:
+    # 한글 2글자 접두사 하나만 맞아도 커버리지가 1.0이 되는 오탐을 막는다.
+    "memory_recall_min_score": 0.34,
+    "memory_recall_min_mass": 1.1,
+    "memory_recall_summary_chars": 140,
+    "memory_recall_max_chars": 900,     # 프롬프트 예산(설명 품질 보호)
+    "memory_profile_domains": 6,
+    "memory_profile_notes": 60,
+    "memory_profile_every": 10,         # N건 증류마다 profile.md 재작성 (0=끔)
+    "memory_profile_max_tokens": 600,
+    # 배치 하나가 일시적으로 실패해도(서버 로딩, 응답 절단) 40분짜리 백필이
+    # 끝나버리지 않게 — 이만큼 재시도한 뒤에야 멈추고, 멈출 때는 "남았다"고
+    # 정직하게 말한다.
+    "memory_backfill_retries": 3,
+    "memory_backfill_retry_sleep": 10.0,
+    # 캐시 은퇴(M20): 기억이 장기 저장을 맡으므로 history.jsonl 은 짧은
+    # 롤링 버퍼로 줄인다 — `macsist memory retire-cache` 가 이 값을
+    # history_max_items 에 쓰고 즉시 프루닝한다(이미지도 함께 정리된다).
+    "memory_history_rolling": 20,
 }
 
 
@@ -329,7 +371,12 @@ _LANG_KEYS = ("system_prompt_text", "system_prompt_image",
               # M17 Gmail prompts (per-language)
               "gmail_triage_system", "gmail_triage_user",
               "gmail_revise_system", "gmail_revise_user",
-              "gmail_compose_system", "gmail_compose_user")
+              "gmail_compose_system", "gmail_compose_user",
+              # M20 memory prompts (per-language)
+              "memory_distill_system", "memory_distill_user",
+              "memory_profile_system", "memory_profile_user",
+              "memory_recall_preamble", "memory_recall_line",
+              "memory_recall_profile")
 
 
 def _migrate_providers(on_disk):

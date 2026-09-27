@@ -30,6 +30,7 @@ Sélectionnez du texte — une phrase en langue étrangère, un paragraphe dense
 - **🌍 6 langues** — 한국어 · English · 简体中文 · 日本語 · Français · Deutsch, pour **l'interface comme pour les réponses**. Changez en direct dans les Réglages, sans redémarrage. Une saisie dans une autre langue reçoit d'abord une ligne `Traduction :` naturelle.
 - **🪟 Panneau Liquid Glass** — un panneau translucide, arrondi, à taille automatique qui apparaît en fondu près du curseur. **Glissez-le où vous voulez** par son arrière-plan.
 - **🗂 Historique** — chaque explication est enregistrée localement et consultable (`⌘⇧H`). Copiez-la, reposez-la avec le modèle actuel (les entrées de zone renvoient la capture enregistrée), ou supprimez une session — le tout dans une fenêtre façon chat.
+- **🧠 Mémoire** — ce que vous lisez s'accumule en **fichiers sur vos centres d'intérêt**. Après chaque explication, le modèle local distille en arrière-plan les concepts sous-jacents en notes markdown dans `memory/notes/*.md` (à vous de les lire et les modifier), et la prochaine fois qu'un sujet proche revient, l'explication **fait le lien avec ce que vous avez déjà vu**. La recherche est instantanée et locale — aucun appel LLM supplémentaire dans le chemin du raccourci, le panneau reste aussi rapide qu'avant. La distillation utilise **uniquement le modèle local** par défaut.
 - **🔌 Votre modèle, votre choix** — un serveur MLX **local**, ou pointez Macsist vers n'importe quelle **API compatible OpenAI** (OpenRouter, etc.). Les clés API vivent dans le **Trousseau** macOS, jamais sur le disque.
 - **🔒 Privé par défaut** — local d'abord, sans télémétrie, sans Electron. Un vrai bundle `.app` signé : le Dock, Cmd-Tab et les listes d'autorisations affichent tous **Macsist** avec son icône.
 
@@ -152,6 +153,7 @@ Installée par `install.sh` comme lien symbolique dans votre `PATH` — fonction
 | `macsist status` | agents, santé du serveur, fournisseur/modèles, état TCC |
 | `macsist logs [app\|server] [-f]` | suit les bons fichiers de log |
 | `macsist settings` / `macsist history` | ouvre la fenêtre principale |
+| `macsist memory [status\|list\|show\|backfill\|distill\|profile\|open\|retire-cache]` | mémoire : inspecter les notes, la construire depuis l'historique (backfill), refaire le profil, retirer l'ancien cache |
 | `macsist doctor` | diagnostic complet ✓/✗ : déploiement, config, clé du Trousseau, santé, TCC, cache de modèles |
 | `macsist update` | `git pull --ff-only` + redéploiement des deux agents |
 

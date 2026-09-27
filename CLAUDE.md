@@ -49,6 +49,17 @@ clone — deterministic imminent/conflict alerts (no LLM) surfaced as
 `calendar_alert` proposals through the existing panel/badge/Telegram pipeline,
 OFF by default; Google private secret-iCal URL in Keychain via the Settings
 "Calendar" card, `macsist calendar`). Full design: **`docs/ASSISTANT.md`**.
+**M20 shipped** — **기억(Memory)** (`app/memory/`, SPEC §5.9): the reading
+history becomes a growing filesystem memory — one markdown note per concept in
+`…/Macsist/memory/notes/*.md` (notes are the source of truth, `index.json` a
+derived cache), distilled from every finished explain by the **local** LLM in
+the background, and recalled in the hotkey path with **no LLM** (IDF
+query-coverage over an in-memory index; Korean handled by prefix indexing) to
+inject an advisory "이미 본 것" block so the explanation ties back to what the
+user already read. 기억 sidebar tab, `macsist memory
+status|list|show|backfill|distill|profile|open|retire-cache`. The old
+`history.jsonl` cache is retired to a short rolling buffer
+(`memory_history_rolling`) once memory holds the long-term record.
 
 ## Stack (locked)
 - macOS **26.2+**, Apple Silicon. **Python 3.13 (miniforge) + PyObjC** (AppKit
@@ -80,6 +91,11 @@ OFF by default; Google private secret-iCal URL in Keychain via the Settings
 - Staleness checks (request generation) happen on the **main thread**.
 - Every tunable (URLs, models, prompts, hotkeys, tokens, sizes) in config.
 - API keys (M9) go in the **Keychain**, never in config.json.
+- Memory (M20): **never call the LLM in the recall path** (hotkey latency is the
+  product); distillation is local-only by default (`memory_local_only`) and its
+  queue cursor advances only on success; the **app is the only writer** to
+  `memory/` (the CLI reads files, asks the app to write); keep
+  `app/memory/__init__.py` import-free so `cli/configure.py` stays stdlib-only.
 - Bundle (M12): **never ad-hoc sign** (per-build CDHash resets TCC), never
   change `CFBundleIdentifier`; assets via `config.asset_dir()` (RESOURCEPATH),
   self-relaunch via `EXECUTABLEPATH` env (in-bundle `sys.executable` is the
