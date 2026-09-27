@@ -840,36 +840,59 @@ memory `verify-ui-without-screenshots`).
   ④ 노트는 사용자가 직접 읽고 고칠 수 있으며 고친 내용이 다음 로드에 반영된다.
   ⑤ 은퇴 후에도 기록 탭·다시 질문·카드 삭제가 동작한다. ⑥ 6개 언어 키 완비.
   *AC verified (2026-09-27, live):* **백필** — `macsist memory backfill` 이
-  실행 중인 앱에 위임되어 173건을 seed 후 배치 4건씩 증류(로컬 27B bf16:
-  prefill 1.6k tok @520 tok/s + decode ~450 tok @9.7 tok/s ≒ 배치당 50초),
-  중간 재배포로 앱이 죽어도 `state.json` 커서에서 이어감(재시드는 ts+mode+input
-  dedupe로 no-op). **이어서 설명** — `Fowlkes-Mallows index…` 캡처에서 리콜이
-  Adjusted Rand Index(0.555)/Batch Silhouette(0.555)를 올리고 답변이
-  "앞서 본 Adjusted Rand Index(ARI)와 Batch Silhouette와 마찬가지로 … ARI가
-  전체 쌍의 일치/불일치를 본다면 FMI는 …" 로 **'쉽게 말하면' 항목 안에서**
-  이어 설명(4단 형식 유지, 새 제목 생성 없음). **무관 캡처** — 주택임대차
-  갱신요구권 문장에서 리콜 0건 → 프로필 줄(123자)만 주입, 답변에 기억 언급 0회.
-  **첫 시도는 실패했고 그게 설계를 고쳤다**: 최초 프리앰블은 "관련 없으면
-  무시"만 강하게 말해 모델이 관련된 경우에도 침묵했다 → 긍정형("이어지면 반드시
-  한 문장으로")+배치 지정('쉽게 말하면' 안, 새 항목 금지)으로 고쳐 통과.
-  **검색 정확도** — 13개 질의 중 12개 기대대로(ARI/OMOP/XAI/GAE 한글·영문·
-  약자 질의 적중, 점심/git/전세/영문 pangram 0건). 남은 1개는 단독 "표준"
-  질의가 OMOP CDM을 올린 것 — 노트가 5개뿐인 코퍼스에서는 사실상 맞는 답이고,
-  블록 자체가 조언이라 오탐이 단정으로 승격되지 않는다. **정규화 결함 2건이
-  라이브에서 잡혔다**: (a) 최초 점수식이 문서 길이로 나눠 `GAE와 PPO의 차이`가
-  GAE 노트를 못 찾음 → 질의 커버리지로 교체, (b) 모델이 같은 분야를
-  "노화 생물학"/"노화생물학"으로 번갈아 써서 관심 분야가 둘로 갈림 →
-  `domains()` 가 공백·대소문자 정규화 키로 집계하고 최빈 표기를 보여준다.
-  **UI** — 기억 탭이 6개 언어 전부에서 빌드/refresh 통과(`HE_DEBUG_OPEN_MEMORY`
-  라이브 확인: `sidebar selected memory` → `main window shown tab=memory`,
-  예외 0), 기억 저장·로컬만 스위치가 즉시 반영. **PyObjC 함정 재발** —
-  5인자 헬퍼를 `_switchAt_title_action_` 으로 두자 import 시
-  `BadPrototypeError` → 모듈 레벨 함수로 이동(§7-14⑧, 프로젝트 메모리
-  `pyobjc-selector-arg-naming`). **stdlib-only 회귀 방지** —
-  `app/memory/__init__.py` 가 distiller를 import 하자 `cli/configure.py` 가
-  httpx 없이 죽었다 → `__init__.py` 를 import-free로 유지(§7-14⑧).
+  실행 중인 앱에 위임되어 **173건 → 노트 69개**(큐 0, `backfill_done_ts` 기록).
+  로컬 27B bf16 실측: prefill ~1.1k tok @600-920 tok/s + decode ~450 tok
+  @9.7 tok/s ≒ 배치(4건)당 50초~2분, 전체 약 50분. 인사말·비서 답변 같은
+  배치는 모델이 `[]`로 정직하게 비우고 "no concepts … skipped"로 소비된다.
+  **중단 후 이어감** — 백필 중 재배포로 앱을 죽인 뒤 다시 실행 → 재시드는
+  ts+mode+input dedupe로 no-op, `state.json` 커서에서 정확히 이어갔다
+  (24 → 149 잔여 → 완주). **이어서 설명** — `Fowlkes-Mallows index…` 캡처에서
+  리콜이 Adjusted Rand Index(0.555)/Batch Silhouette를 올리고 답변이
+  "앞서 본 Adjusted Rand Index(ARI)와 Batch Silhouette와 마찬가지로 …
+  ARI가 전체 쌍의 일치/불일치를 본다면 FMI는 …"로 **'쉽게 말하면' 항목 안에서**
+  이어 설명(4단 형식 유지, 새 제목 0). **기억이 복리로 자란다** — 그 설명이
+  만든 노트 `fowlkes-mallows-index` 의 terms에 `ARI, Adjusted Rand Index` 가
+  들어가, 다음 회차에는 두 개념이 서로를 끌어온다. **무관 캡처** — 주택임대차
+  갱신요구권 문장에서 리콜 0건 → 프로필 줄(123자)만 주입, 기억 언급 0회.
+  **앱 안 전체 고리(라이브)** — `HE_DEBUG_KEEP_PANEL` + `EXPLAIN_AFTER` 로
+  핫키 explain → `memory: recall Batch Silhouette(0.584), PBISC(0.582),
+  Adjusted Rand Index(0.526)` 주입 → 스트림 완료 → `_remember` 적립 →
+  poke로 즉시 증류 → `new note fowlkes-mallows-index`(173 → 174건).
+  **손으로 고친 노트** — `aliases` 에 사람이 `조정랜드지수` 를 직접 써넣자
+  다음 로드(mtime 변화 → 재파싱)에서 그 별칭 질의가 그 노트를 1위로 올렸다.
+  **검색 정확도** — 13개 질의 중 12개 기대대로(ARI/OMOP/XAI/GAE를 한글·영문·
+  약자로 물어도 적중, 점심/git/전세/영문 pangram 0건). 남은 1개는 단독 "표준"
+  질의가 OMOP CDM을 올린 것 — 노트 5개 코퍼스에서는 사실상 맞는 답이고,
+  블록이 조언이라 오탐이 단정으로 승격되지 않는다. **캐시 은퇴** —
+  `macsist memory retire-cache`: 기록 174건 → 20건, 캡처 이미지 34장 →
+  2장(5.7MB → 444KB), `history.jsonl` 248KB → 24KB, `history_max_items=20`
+  기록. 은퇴 후 라이브 확인: 기록 탭 20/20 + 기억 탭 70/70 정상, 예외 0.
+  빈 기억/미증류 큐에서는 거부(`은퇴 보류: 기억이 비어 있습니다 …`).
+  **UI** — 기억 탭이 6개 언어 전부 빌드/refresh 통과,
+  `HE_DEBUG_OPEN_MEMORY` 라이브 확인(`sidebar selected memory` →
+  `main window shown tab=memory`), 기억 저장·로컬만 스위치 즉시 반영.
   `macsist memory status|list|show|backfill|distill|profile|open|retire-cache`
-  + `macsist doctor` 의 `[기억 (M20)]` 섹션 동작 확인.
+  + `macsist doctor` 의 `[기억 (M20)]` 섹션 동작, `macsist doctor` 전체 통과.
+
+  *라이브에서 잡힌 결함 4건 (설계를 고친 것들):*
+  1. **빈 추출을 실패로 처리 → 큐 영구 봉쇄.** 모델이 `[]`(뽑을 개념 없음 —
+     정당한 답)을 반환하면 커서가 전진하지 않아 같은 4건이 큐를 영원히 막고,
+     백필은 149건을 남긴 채 "finished"라고 보고했다. → 유효한 빈 배열은
+     **성공(소비)**, JSON 자체가 없을 때만 재시도.
+  2. **배치 1회 실패로 40분 작업 종료.** → `memory_backfill_retries` 만큼
+     재시도하고, 큐가 남은 채 멈추면 "STOPPED — N건 남음"이라고 정직하게 말한다.
+  3. **문서측 정규화가 리콜을 죽였다.** 최초 점수식이 노트 term 수로 나눠
+     `GAE와 PPO의 차이` 가 GAE 노트를 못 찾았다 → 질의 커버리지로 교체.
+  4. **프리앰블이 "무시하라"에 치우쳐 모델이 관련된 경우에도 침묵.**
+     → 긍정형("이어지면 반드시 한 문장으로") + 배치 지정('쉽게 말하면' 안,
+     새 항목 금지)으로 고쳐 통과. 부수적으로 모델이 같은 분야를
+     "노화 생물학"/"노화생물학"으로 번갈아 써서 관심 분야가 갈리는 것도
+     `domains()` 정규화(공백·대소문자 접기, 최빈 표기 표시)로 고쳤다.
+
+  *알려진 거친 부분:* 증류가 드물게 쓸모없는 제목(모델 파일명 조각 등)을
+  노트로 만든다 — 기억 탭의 "이 기억 삭제" 한 번으로 정리되며, 제목 필터를
+  더 세게 걸면 `GPT-4o` 같은 진짜 이름을 잃는다. `links` 는 모델이 비워두는
+  경우가 많지만 terms 공유로 관계는 유지된다(노트 간 명시적 링크는 후속 과제).
 
 ---
 
@@ -946,7 +969,8 @@ memory `verify-ui-without-screenshots`).
     설명 속 단정으로 승격되면 안 되므로 "관련 없으면 무시하라"가 프롬프트에
     박혀 있어야 한다. ⑤ `memory_local_only` — 독서 이력은 프로바이더를 외부로
     바꿨다고 따라 나가면 안 된다. ⑥ 증류 실패 시 **커서를 전진시키지 않는다**
-    (재시도 ≫ 유실). ⑦ 기억을 쓰는 프로세스는 **앱 하나** — CLI는 읽고, 쓰기는
+    (재시도 ≫ 유실) — 단, 모델의 **유효한 빈 배열은 성공**이다. 실패로 보면
+    그 배치가 큐를 영구히 막는다(M20 백필에서 실제로 149건이 멈췄다). ⑦ 기억을 쓰는 프로세스는 **앱 하나** — CLI는 읽고, 쓰기는
     분산 알림으로 부탁한다. ⑧ `app/memory/__init__.py`는 **import를 두지 않는다**
     — `from memory.store import …`가 distiller→llm_client→httpx를 끌고 오면
     `cli/configure.py`의 stdlib-only 보장이 깨진다(실제로 한 번 깨졌다).
