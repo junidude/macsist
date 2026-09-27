@@ -523,6 +523,32 @@ class MemoryStore:
             if cursor >= _PENDING_COMPACT_AT:
                 self._compact_pending(cursor)
 
+    def compact_pending(self):
+        """Drop every already-distilled line from the queue. Called by
+        `retire-cache` (M20): once the notes hold the long-term record, the raw
+        readings should not survive in the queue either — otherwise "the old
+        cache is gone" would be only half true (history.jsonl and the capture
+        PNGs pruned, the same text still sitting here). Returns bytes freed.
+
+        Called from the CLI, i.e. a second process, which is the one place the
+        single-writer rule bends. `retire-cache` only runs with an empty queue,
+        so the window is "an explain finishes during the rewrite" — that one
+        reading would miss distillation. Accepted over asking the app (which
+        need not be running) for a file rewrite that is already atomic."""
+        with self._lock:
+            try:
+                before = self.pending_path.stat().st_size
+            except OSError:
+                return 0
+            cursor = int(self.state().get("pending_cursor") or 0)
+            if not cursor:
+                return 0
+            self._compact_pending(cursor)
+            try:
+                return before - self.pending_path.stat().st_size
+            except OSError:
+                return before
+
     def _compact_pending(self, cursor):
         keep = self.pending()
         tmp = self.pending_path.with_suffix(".jsonl.tmp")

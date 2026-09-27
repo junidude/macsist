@@ -421,7 +421,9 @@ def cmd_memory_retire_cache(args):
     config.save()
     with _quiet():
         history._prune(keep)
+        queue_freed = store.compact_pending()
     result = {
+        "queue_bytes_freed": queue_freed,
         "kept": keep,
         "records_before": before,
         "records_after": len(history.load()),
@@ -436,6 +438,8 @@ def cmd_memory_retire_cache(args):
     print(f"설명 기록 {result['records_before']}건 → "
           f"{result['records_after']}건 (history_max_items={keep})")
     print(f"남은 캡처 이미지: {result['images_left']}장")
+    if result["queue_bytes_freed"]:
+        print(f"정리 완료된 읽기 큐 {result['queue_bytes_freed'] // 1024}KB 회수")
     print(f"기억 노트 {result['notes']}개가 장기 기록을 맡습니다.")
     return 0
 

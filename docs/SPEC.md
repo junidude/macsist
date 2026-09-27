@@ -633,6 +633,9 @@ profile.md        관심사 프로필(LLM). 기억이 스스로를 요약한 것
 `memory_history_rolling`(20)로 낮추고 즉시 프루닝한다 — 기존
 `HistoryStore._prune`이 JSONL을 원자적으로 재작성하면서 살아남은 레코드가
 참조하지 않는 캡처 PNG까지 지우므로 `history_images/`의 용량도 함께 회수된다.
+**수집 큐도 같이 압축한다** (`store.compact_pending`): 그러지 않으면 같은
+원문이 `pending.jsonl`의 처리 완료분으로 남아 "옛 캐시를 지웠다"가 반만
+사실이 된다(라이브에서 171KB가 그렇게 남아 있었다).
 기억이 비어 있거나 큐에 미증류 항목이 남아 있으면 **거부한다** — 그 읽기들의
 유일한 다른 사본이 바로 그 캐시이기 때문이다. 기록 탭·다시 질문·카드 삭제
 (M7/M11)는 짧은 버퍼 위에서 그대로 동작한다.
@@ -866,7 +869,8 @@ memory `verify-ui-without-screenshots`).
   블록이 조언이라 오탐이 단정으로 승격되지 않는다. **캐시 은퇴** —
   `macsist memory retire-cache`: 기록 174건 → 20건, 캡처 이미지 34장 →
   2장(5.7MB → 444KB), `history.jsonl` 248KB → 24KB, `history_max_items=20`
-  기록. 은퇴 후 라이브 확인: 기록 탭 20/20 + 기억 탭 70/70 정상, 예외 0.
+  기록 + 수집 큐 압축(176KB → 0B, 커서 리셋). 은퇴 후 라이브 확인:
+  기록 탭 20/20 + 기억 탭 70/70 정상, 예외 0.
   빈 기억/미증류 큐에서는 거부(`은퇴 보류: 기억이 비어 있습니다 …`).
   **UI** — 기억 탭이 6개 언어 전부 빌드/refresh 통과,
   `HE_DEBUG_OPEN_MEMORY` 라이브 확인(`sidebar selected memory` →
