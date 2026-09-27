@@ -406,10 +406,12 @@ class MemoryStore:
             merged["title"] = str(meta.get("title") or title)
             merged["kind"] = str(concept.get("kind")
                                  or meta.get("kind") or "concept")
+            links = [link for link in (concept.get("links") or [])
+                     if str(link).strip() != slug]   # a note linking itself
             for key, incoming in (("domains", concept.get("domains")),
                                   ("aliases", aliases),
                                   ("terms", concept.get("terms")),
-                                  ("links", concept.get("links"))):
+                                  ("links", links)):
                 have = [str(v) for v in (meta.get(key) or [])]
                 seen_lower = {v.lower() for v in have}
                 for value in (incoming or []):
