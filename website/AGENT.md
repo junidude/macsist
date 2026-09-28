@@ -82,7 +82,8 @@ rsync. Keep deploy to **one command**.
 
 - [ ] Hero: icon, name, tagline, two CTAs, "macOS 26.2+ · Apple Silicon"
 - [ ] In-action: two screenshots + captions
-- [ ] Features: 6–8 items, wording aligned with the README
+- [ ] Features: 6–8 items, wording aligned with the README (re-pulled
+      today — SPEC §11; memory must be among them)
 - [ ] Download: DMG button + **first-open note** + source one-liner
 - [ ] How it works: brief + link to repo
 - [ ] FAQ: privacy / API-or-local / security warning / which Macs
@@ -104,6 +105,8 @@ rsync. Keep deploy to **one command**.
 
 - New app version → the download link is version-less and **does not change**;
   just refresh the screenshots/copy if the UI changed.
-- Screenshots/feature copy live in the macsist repo; re-pull when it updates.
+- Screenshots/feature copy live in the macsist repo; re-pull when it updates
+  (SPEC §11 is the checklist, and it also says to confirm a GitHub Release
+  exists for the features the page claims).
 - If localizing, mirror the repo's `README.<lang>.md` set and add a language
   switcher (SPEC §9).

@@ -24,9 +24,11 @@ explanations.
 Macsist is a **native macOS menu-bar assistant** that explains anything you
 select — instantly, locally, in your language. Press a hotkey to get a concise,
 streamed explanation of the **selected text** (any app) or a **screen region**
-you drag-select, in a floating glass panel by the cursor. It runs on a **local**
-MLX model or any OpenAI-compatible API. No cloud required, no Electron, private
-by default. Requires **macOS 26.2+ on Apple Silicon**.
+you drag-select, in a floating glass panel by the cursor. What you read
+accumulates into a local **memory** of your interests, so related explanations
+tie back to what you already saw. It runs on a **local** MLX model or any
+OpenAI-compatible API. No cloud required, no Electron, private by default.
+Requires **macOS 26.2+ on Apple Silicon**.
 
 ## 3. Goals / non-goals
 
@@ -43,9 +45,17 @@ by default. Requires **macOS 26.2+ on Apple Silicon**.
    Apple Silicon" line.
 2. **In action** — the two product screenshots with one-line captions
    (text-explain, region-explain).
-3. **Features** — 6–8 cards/bullets pulled from the README feature list (text
-   explain, region explain, follow-up chat, 6 languages, glass panel +
-   drag-to-move, history, bring-your-own model, private/local-first).
+3. **Features** — 6–8 cards/bullets pulled from the README feature list. As of
+   2026-09 that list is: text explain, region explain, follow-up chat,
+   **memory** (what you read becomes local markdown notes; related explanations
+   tie back to it), 6 languages, glass panel + drag-to-move, history,
+   bring-your-own model, private/local-first. Pick the 6–8 that tell the
+   clearest story — **memory is the newest differentiator, don't drop it.**
+   The app also has an opt-in **assistant** side (task board, mail/calendar
+   nudges, confirm-before-acting); it is deliberately NOT part of the landing
+   story — the page sells the explainer. Mention it at most as one line.
+   *This enumeration goes stale: re-read the repo README before each rebuild
+   (see §11) and treat the README as canonical.*
 4. **Download** — the two paths side by side:
    - **macOS app:** the Download button + the **First-open note** (§6, must be
      impossible to miss).
@@ -143,3 +153,21 @@ block launch on full localization.
 - Lighthouse: performance & accessibility ≥ 95, no layout shift.
 - Builds to static files and serves from the owner's server with one deploy
   command (documented in AGENT.md).
+
+---
+
+## 11. Keeping the page true (re-sync checklist)
+
+This kit is a snapshot; the app keeps shipping. Before any rebuild or release
+announcement, re-pull from the repo and fix drift:
+
+1. **Feature copy** — the README's feature bullets (`README.md`, plus
+   `README.<lang>.md` if localized). They are canonical; §4.3 above is only a
+   snapshot of them.
+2. **Download link freshness** — the stable link always points at
+   `releases/latest`, so the page silently serves whatever the newest GitHub
+   Release is. Check that a release actually exists for the features the page
+   claims: a page advertising memory while the latest DMG predates it is the
+   one failure mode this section exists to prevent.
+3. **Requirements line** — macOS/Silicon minimums from the README badges.
+4. **Screenshots** — §8 paths, in case new ones were added.
