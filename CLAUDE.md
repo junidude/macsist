@@ -123,7 +123,8 @@ status|list|show|backfill|distill|profile|open|retire-cache`. The old
 - **Plan mode before each milestone** (M5–M10 in `docs/SPEC.md` §6); verify
   each milestone's acceptance criteria against the live setup before moving on.
 - `/clear` between milestones (project memory persists).
-- Repo: `github.com/junidude/macsist` (private). Commit/push after milestones.
+- Repo: `github.com/junidude/macsist` (**public** — releases are downloaded
+  from it). Commit/push after milestones.
 
 ## Pointers
 - Spec, v2 designs, milestones, gotchas: **`docs/SPEC.md`**

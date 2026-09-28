@@ -5,7 +5,7 @@ TCC/Dock/Cmd-Tab identity; keep CFBundleIdentifier stable forever.
 
 from setuptools import setup
 
-VERSION = "0.12.0"  # M12
+VERSION = "0.20.0"  # M20 (기억)
 
 OPTIONS = {
     "iconfile": "assets/macsist.icns",  # also sets CFBundleIconFile
